@@ -6,11 +6,11 @@ import { runIciciCsvImport } from "@/modules/imports/import-flow";
 import { updateTransactionCategory } from "@/modules/imports/persistence";
 
 export async function importIciciStatement(formData: FormData) {
-  const accountDisplayName = String(formData.get("accountDisplayName") || "ICICI Savings").trim();
+  const accountDisplayName = String(formData.get("accountDisplayName") || "Primary account").trim();
   const statement = formData.get("statement");
 
   if (!(statement instanceof File) || statement.size === 0) {
-    redirect("/?error=Choose%20an%20ICICI%20CSV%20statement%20before%20running%20the%20import");
+    redirect("/?error=Choose%20a%20supported%20statement%20before%20running%20the%20import");
   }
 
   let importBatchId = "";

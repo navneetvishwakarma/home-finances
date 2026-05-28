@@ -1,7 +1,9 @@
 import { parseCsvRecords } from "./csv";
+import { hdfcBankCsvProfile } from "./hdfc-bank-csv";
 import { iciciBankCsvProfile } from "./icici-bank-csv";
+import { iciciCreditCardCsvProfile } from "./icici-credit-card-csv";
 
-const sourceProfiles = [iciciBankCsvProfile];
+const sourceProfiles = [iciciBankCsvProfile, hdfcBankCsvProfile, iciciCreditCardCsvProfile];
 
 export function parseSourceCsv(rawCsv: string) {
   const records = parseCsvRecords(rawCsv);
@@ -17,5 +19,5 @@ export function parseSourceCsv(rawCsv: string) {
     }
   }
 
-  throw new Error("Unsupported CSV headers. Expected ICICI bank CSV transaction headers.");
+  throw new Error("Unsupported CSV headers. Expected a supported bank or card statement CSV.");
 }

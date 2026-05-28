@@ -70,12 +70,13 @@ export async function uploadIciciCsvForAccount(
     accountId: string;
     filename: string;
     rawCsv: string;
+    sourceProfileId?: string;
   }
 ) {
   try {
     return await createImportBatch(db, {
       accountId: input.accountId,
-      sourceProfileId: "icici-bank-csv",
+      sourceProfileId: input.sourceProfileId ?? "icici-bank-csv",
       filename: input.filename,
       fileFingerprint: `sha256:${createHash("sha256").update(input.rawCsv).digest("hex")}`,
       rawSource: input.rawCsv,
@@ -237,6 +238,14 @@ function sourceRowNumber(rawSourcePayload: unknown) {
     "S No." in rawSourcePayload
   ) {
     return Number(rawSourcePayload["S No."]);
+  }
+
+  if (
+    typeof rawSourcePayload === "object" &&
+    rawSourcePayload !== null &&
+    "Source Row Number" in rawSourcePayload
+  ) {
+    return Number(rawSourcePayload["Source Row Number"]);
   }
 
   return 0;

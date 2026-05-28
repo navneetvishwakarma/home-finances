@@ -11,14 +11,21 @@ type DashboardData = Awaited<ReturnType<typeof getImportDashboard>>;
 
 export function DashboardLedger({ data }: { data: DashboardData }) {
   const differenceLabel = data.tally.differenceMinorUnits === 0 ? "Balanced" : "Difference";
+  const confidenceLabel =
+    data.tally.differenceMinorUnits === 0 ? "Confidence: exact match" : "Confidence: review needed";
   const categoryTotals = summarizeCategories(data.transactions);
 
   return (
     <section className="dashboard-ledger">
       <header>
-        <p>Import batch</p>
-        <h1>{data.importBatch.id}</h1>
-        <p>{data.importBatch.filename}</p>
+        <div>
+          <p className="section-kicker">Reconciliation status</p>
+          <h2>{data.importBatch.filename}</h2>
+          <p className="batch-id">Import batch {data.importBatch.id}</p>
+        </div>
+        <span className={data.tally.differenceMinorUnits === 0 ? "status-chip is-balanced" : "status-chip is-review"}>
+          {confidenceLabel}
+        </span>
       </header>
 
       <dl className="tally-grid">
@@ -49,7 +56,10 @@ export function DashboardLedger({ data }: { data: DashboardData }) {
       </dl>
 
       <section className="category-summary" aria-labelledby="category-summary-heading">
-        <h2 id="category-summary-heading">Category totals</h2>
+        <div className="section-title-row">
+          <h2 id="category-summary-heading">Category intelligence</h2>
+          <span>{categoryTotals.length} categories detected</span>
+        </div>
         <div className="category-summary-table-wrap">
           <table className="category-summary-table">
             <thead>
@@ -74,6 +84,10 @@ export function DashboardLedger({ data }: { data: DashboardData }) {
         </div>
       </section>
 
+      <div className="section-title-row">
+        <h2>Transaction stream</h2>
+        <span>{data.transactions.length} rows imported</span>
+      </div>
       <div className="ledger-table-wrap">
         <table className="ledger-table">
           <thead>
@@ -107,8 +121,10 @@ export function DashboardLedger({ data }: { data: DashboardData }) {
                         </option>
                       ))}
                     </select>
-                    <button type="submit">Save</button>
-                    <span>{toTitleCase(transaction.categorySource)}</span>
+                    <button type="submit" aria-label={`Save category for ${transaction.description}`}>
+                      Save
+                    </button>
+                    <span>{formatCategorySource(transaction.categorySource)}</span>
                   </form>
                 </td>
                 <td>{formatMoney(transaction.amountMinorUnits)}</td>
@@ -166,4 +182,11 @@ function formatMoney(minorUnits: number) {
 
 function toTitleCase(value: string) {
   return value.charAt(0).toUpperCase() + value.slice(1);
+}
+
+function formatCategorySource(value: string) {
+  return value
+    .split("_")
+    .map((part) => toTitleCase(part))
+    .join(" ");
 }

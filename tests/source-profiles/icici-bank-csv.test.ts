@@ -21,6 +21,6 @@ test("rejects unsupported CSV headers with an actionable error", () => {
   const unsupportedCsv = "Date,Narration,Debit,Credit,Balance\n2026-04-01,Opening,0.00,10.00,10.00";
 
   expect(() => parseSourceCsv(unsupportedCsv)).toThrow(
-    "Unsupported CSV headers. Expected ICICI bank CSV transaction headers."
+    "Unsupported CSV headers. Expected a supported bank or card statement CSV."
   );
 });

@@ -23,12 +23,13 @@ export async function runIciciCsvImport(
 ) {
   const account = await findOrCreateBankAccount(db, input.accountDisplayName);
   await seedLocalClassificationKnowledge(db);
+  const parsed = parseSourceCsv(input.rawCsv);
   const importBatch = await uploadIciciCsvForAccount(db, {
     accountId: account.id,
     filename: input.filename,
-    rawCsv: input.rawCsv
+    rawCsv: input.rawCsv,
+    sourceProfileId: parsed.profileId
   });
-  const parsed = parseSourceCsv(input.rawCsv);
 
   await persistParsedTransactions(db, {
     accountId: account.id,
@@ -56,7 +57,7 @@ async function findOrCreateBankAccount(db: Db, displayName: string) {
 
   return createAccount(db, {
     displayName,
-    providerLabel: "ICICI Bank",
+    providerLabel: "Imported statement",
     currency: "INR"
   });
 }

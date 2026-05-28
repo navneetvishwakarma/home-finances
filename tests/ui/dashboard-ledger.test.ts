@@ -66,7 +66,10 @@ test("renders category totals and category controls for ledger rows", () => {
     })
   );
 
-  expect(html).toContain("Category totals");
+  expect(html).toContain("Reconciliation status");
+  expect(html).toContain("Confidence: exact match");
+  expect(html).toContain("Category intelligence");
+  expect(html).toContain("Transaction stream");
   expect(html).toContain("Income");
   expect(html).toContain("Food");
   expect(html).toContain("INR 1,000.00");
