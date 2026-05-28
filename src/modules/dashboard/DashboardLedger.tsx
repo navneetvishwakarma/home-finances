@@ -1,10 +1,17 @@
 import React from "react";
+import { updateTransactionCategoryAction } from "@/app/actions";
+import {
+  categoryLabel,
+  transactionCategories,
+  type TransactionCategory
+} from "@/modules/classification/categories";
 import type { getImportDashboard } from "@/modules/imports/persistence";
 
 type DashboardData = Awaited<ReturnType<typeof getImportDashboard>>;
 
 export function DashboardLedger({ data }: { data: DashboardData }) {
   const differenceLabel = data.tally.differenceMinorUnits === 0 ? "Balanced" : "Difference";
+  const categoryTotals = summarizeCategories(data.transactions);
 
   return (
     <section className="dashboard-ledger">
@@ -41,6 +48,32 @@ export function DashboardLedger({ data }: { data: DashboardData }) {
         </div>
       </dl>
 
+      <section className="category-summary" aria-labelledby="category-summary-heading">
+        <h2 id="category-summary-heading">Category totals</h2>
+        <div className="category-summary-table-wrap">
+          <table className="category-summary-table">
+            <thead>
+              <tr>
+                <th>Category</th>
+                <th>Incoming</th>
+                <th>Outgoing</th>
+                <th>Net</th>
+              </tr>
+            </thead>
+            <tbody>
+              {categoryTotals.map((total) => (
+                <tr key={total.category}>
+                  <td>{categoryLabel(total.category)}</td>
+                  <td>{formatMoney(total.incomingMinorUnits)}</td>
+                  <td>{formatMoney(total.outgoingMinorUnits)}</td>
+                  <td>{formatMoney(total.netMinorUnits)}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      </section>
+
       <div className="ledger-table-wrap">
         <table className="ledger-table">
           <thead>
@@ -48,6 +81,7 @@ export function DashboardLedger({ data }: { data: DashboardData }) {
               <th>Date</th>
               <th>Description</th>
               <th>Direction</th>
+              <th>Category</th>
               <th>Amount</th>
               <th>Running balance</th>
             </tr>
@@ -58,6 +92,25 @@ export function DashboardLedger({ data }: { data: DashboardData }) {
                 <td>{transaction.transactionDate}</td>
                 <td>{transaction.description}</td>
                 <td>{toTitleCase(transaction.direction)}</td>
+                <td>
+                  <form action={updateTransactionCategoryAction} className="category-form">
+                    <input type="hidden" name="transactionId" value={transaction.id} />
+                    <input type="hidden" name="importBatchId" value={data.importBatch.id} />
+                    <select
+                      name="category"
+                      defaultValue={transaction.category}
+                      aria-label={`Category for ${transaction.description}`}
+                    >
+                      {transactionCategories.map((category) => (
+                        <option key={category.slug} value={category.slug}>
+                          {category.label}
+                        </option>
+                      ))}
+                    </select>
+                    <button type="submit">Save</button>
+                    <span>{toTitleCase(transaction.categorySource)}</span>
+                  </form>
+                </td>
                 <td>{formatMoney(transaction.amountMinorUnits)}</td>
                 <td>{formatMoney(transaction.runningBalanceMinorUnits)}</td>
               </tr>
@@ -66,6 +119,41 @@ export function DashboardLedger({ data }: { data: DashboardData }) {
         </table>
       </div>
     </section>
+  );
+}
+
+function summarizeCategories(transactions: DashboardData["transactions"]) {
+  const totals = new Map<
+    string,
+    {
+      category: TransactionCategory | string;
+      incomingMinorUnits: number;
+      outgoingMinorUnits: number;
+      netMinorUnits: number;
+    }
+  >();
+
+  for (const transaction of transactions) {
+    const current = totals.get(transaction.category) ?? {
+      category: transaction.category,
+      incomingMinorUnits: 0,
+      outgoingMinorUnits: 0,
+      netMinorUnits: 0
+    };
+
+    if (transaction.direction === "incoming") {
+      current.incomingMinorUnits += transaction.amountMinorUnits;
+      current.netMinorUnits += transaction.amountMinorUnits;
+    } else {
+      current.outgoingMinorUnits += transaction.amountMinorUnits;
+      current.netMinorUnits -= transaction.amountMinorUnits;
+    }
+
+    totals.set(transaction.category, current);
+  }
+
+  return [...totals.values()].sort((left, right) =>
+    categoryLabel(left.category).localeCompare(categoryLabel(right.category))
   );
 }
 

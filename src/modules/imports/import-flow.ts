@@ -1,6 +1,7 @@
 import { eq } from "drizzle-orm";
 import type { PostgresJsDatabase } from "drizzle-orm/postgres-js";
 import { accounts } from "@/db/schema";
+import { seedLocalClassificationKnowledge } from "@/modules/classification/persistence";
 import {
   computeStatementTally,
   createAccount,
@@ -21,6 +22,7 @@ export async function runIciciCsvImport(
   }
 ) {
   const account = await findOrCreateBankAccount(db, input.accountDisplayName);
+  await seedLocalClassificationKnowledge(db);
   const importBatch = await uploadIciciCsvForAccount(db, {
     accountId: account.id,
     filename: input.filename,
