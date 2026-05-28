@@ -3,6 +3,7 @@
 import { redirect } from "next/navigation";
 import { getMigratedDatabase } from "@/db/client";
 import { runIciciCsvImport } from "@/modules/imports/import-flow";
+import { updateTransactionCategory } from "@/modules/imports/persistence";
 
 export async function importIciciStatement(formData: FormData) {
   const accountDisplayName = String(formData.get("accountDisplayName") || "ICICI Savings").trim();
@@ -25,6 +26,22 @@ export async function importIciciStatement(formData: FormData) {
   } catch (error) {
     const message = error instanceof Error ? error.message : "Import failed";
     redirect(`/?error=${encodeURIComponent(message)}`);
+  }
+
+  redirect(`/?importBatchId=${importBatchId}`);
+}
+
+export async function updateTransactionCategoryAction(formData: FormData) {
+  const transactionId = String(formData.get("transactionId") || "");
+  const importBatchId = String(formData.get("importBatchId") || "");
+  const category = String(formData.get("category") || "");
+
+  try {
+    const db = await getMigratedDatabase();
+    await updateTransactionCategory(db, { transactionId, category });
+  } catch (error) {
+    const message = error instanceof Error ? error.message : "Category update failed";
+    redirect(`/?importBatchId=${importBatchId}&error=${encodeURIComponent(message)}`);
   }
 
   redirect(`/?importBatchId=${importBatchId}`);

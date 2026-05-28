@@ -2,6 +2,7 @@ import {
   bigint,
   boolean,
   date,
+  integer,
   jsonb,
   pgTable,
   text,
@@ -57,6 +58,8 @@ export const transactions = pgTable(
     direction: text("direction").notNull(),
     amountMinorUnits: bigint("amount_minor_units", { mode: "number" }).notNull(),
     runningBalanceMinorUnits: bigint("running_balance_minor_units", { mode: "number" }).notNull(),
+    category: text("category").notNull().default("uncategorized"),
+    categorySource: text("category_source").notNull().default("uncategorized"),
     rowHash: text("row_hash").notNull(),
     rawSourcePayload: jsonb("raw_source_payload").notNull(),
     createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow()
@@ -92,5 +95,55 @@ export const statementTallies = pgTable(
   },
   (table) => ({
     importBatchUnique: unique("statement_tallies_import_batch_unique").on(table.importBatchId)
+  })
+);
+
+export const classificationDatasets = pgTable("classification_datasets", {
+  id: uuid("id").primaryKey(),
+  name: text("name").notNull(),
+  sourcePath: text("source_path").notNull(),
+  checksum: text("checksum").notNull(),
+  importedRowCount: integer("imported_row_count").notNull(),
+  importedAt: timestamp("imported_at", { withTimezone: true }).notNull().defaultNow()
+});
+
+export const classificationExamples = pgTable(
+  "classification_examples",
+  {
+    id: uuid("id").primaryKey(),
+    datasetId: uuid("dataset_id")
+      .notNull()
+      .references(() => classificationDatasets.id),
+    originalText: text("original_text").notNull(),
+    normalizedText: text("normalized_text").notNull(),
+    category: text("category").notNull(),
+    sourceRowHash: text("source_row_hash").notNull(),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow()
+  },
+  (table) => ({
+    datasetRowUnique: unique("classification_examples_dataset_row_unique").on(
+      table.datasetId,
+      table.sourceRowHash
+    )
+  })
+);
+
+export const classificationRules = pgTable(
+  "classification_rules",
+  {
+    id: uuid("id").primaryKey(),
+    pattern: text("pattern").notNull(),
+    category: text("category").notNull(),
+    priority: integer("priority").notNull(),
+    source: text("source").notNull(),
+    supportCount: integer("support_count").notNull().default(1),
+    lastMatchedAt: timestamp("last_matched_at", { withTimezone: true }),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow()
+  },
+  (table) => ({
+    patternSourceUnique: unique("classification_rules_pattern_source_unique").on(
+      table.pattern,
+      table.source
+    )
   })
 );

@@ -13,6 +13,7 @@ import {
   createImportBatch,
   getImportDashboard,
   persistParsedTransactions,
+  updateTransactionCategory,
   uploadIciciCsvForAccount
 } from "@/modules/imports/persistence";
 import { DashboardLedger } from "@/modules/dashboard/DashboardLedger";
@@ -158,11 +159,60 @@ test("persists parsed ICICI rows as canonical bank transactions", async () => {
     description: "INF/IWISH CONTRIBUTION",
     direction: "outgoing",
     amountMinorUnits: 620000,
-    runningBalanceMinorUnits: 15336546
+    runningBalanceMinorUnits: 15336546,
+    category: "savings_investments",
+    categorySource: "system_rule"
   });
   expect(outgoing.rawSourcePayload).toMatchObject({
     "Transaction Remarks": "INF/IWISH CONTRIBUTION",
     "Withdrawal Amount(INR)": "6200.00"
+  });
+});
+
+test("updates a transaction category manually and marks the source as manual", async () => {
+  const account = await createAccount(db, {
+    displayName: "ICICI Savings Manual Category Test",
+    providerLabel: "ICICI Bank",
+    currency: "INR"
+  });
+  const importBatch = await createImportBatch(db, {
+    accountId: account.id,
+    sourceProfileId: "icici-bank-csv",
+    filename: "manual-category.csv",
+    fileFingerprint: "sha256:manual-category",
+    rawSource: "csv-content",
+    status: "uploaded"
+  });
+  const [transaction] = await persistParsedTransactions(db, {
+    accountId: account.id,
+    importBatchId: importBatch.id,
+    rows: [
+      {
+        valueDate: "2026-04-01",
+        transactionDate: "2026-04-01",
+        description: "UPI GROCERY STORE",
+        withdrawalAmount: "1200.00",
+        depositAmount: "0.00",
+        balance: "10000.00",
+        rawRow: {
+          "S No.": "1",
+          "Transaction Remarks": "UPI GROCERY STORE",
+          "Withdrawal Amount(INR)": "1200.00",
+          "Deposit Amount(INR)": "0.00"
+        }
+      }
+    ]
+  });
+
+  const updated = await updateTransactionCategory(db, {
+    transactionId: transaction.id,
+    category: "food"
+  });
+
+  expect(updated).toMatchObject({
+    id: transaction.id,
+    category: "food",
+    categorySource: "manual"
   });
 });
 

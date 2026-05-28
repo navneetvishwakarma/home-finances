@@ -2,6 +2,14 @@ import { createHash, randomUUID } from "node:crypto";
 import { eq } from "drizzle-orm";
 import type { PostgresJsDatabase } from "drizzle-orm/postgres-js";
 import { accounts, importBatches, statementTallies, transactions } from "@/db/schema";
+import {
+  isTransactionCategory,
+  type TransactionCategory
+} from "@/modules/classification/categories";
+import {
+  classifyWithStoredRules,
+  learnManualClassificationRule
+} from "@/modules/classification/persistence";
 import type { CanonicalParsedRow } from "@/modules/source-profiles/icici-bank-csv";
 
 type Db = PostgresJsDatabase<Record<string, unknown>>;
@@ -101,33 +109,70 @@ export async function persistParsedTransactions(
     rows: CanonicalParsedRow[];
   }
 ) {
+  const values = await Promise.all(
+    input.rows.map(async (row) => {
+      const direction = moneyToMinorUnits(row.depositAmount) > 0 ? "incoming" : "outgoing";
+      const amount =
+        direction === "incoming"
+          ? moneyToMinorUnits(row.depositAmount)
+          : moneyToMinorUnits(row.withdrawalAmount);
+      const classification = await classifyWithStoredRules(db, row.description);
+
+      return {
+        id: randomUUID(),
+        accountId: input.accountId,
+        importBatchId: input.importBatchId,
+        transactionDate: row.transactionDate,
+        description: row.description,
+        direction,
+        amountMinorUnits: amount,
+        runningBalanceMinorUnits: moneyToMinorUnits(row.balance),
+        category: classification.category,
+        categorySource: classification.categorySource,
+        rowHash: `sha256:${createHash("sha256")
+          .update(JSON.stringify(row.rawRow))
+          .digest("hex")}`,
+        rawSourcePayload: row.rawRow
+      };
+    })
+  );
+
   return db
     .insert(transactions)
-    .values(
-      input.rows.map((row) => {
-        const direction = moneyToMinorUnits(row.depositAmount) > 0 ? "incoming" : "outgoing";
-        const amount =
-          direction === "incoming"
-            ? moneyToMinorUnits(row.depositAmount)
-            : moneyToMinorUnits(row.withdrawalAmount);
-
-        return {
-          id: randomUUID(),
-          accountId: input.accountId,
-          importBatchId: input.importBatchId,
-          transactionDate: row.transactionDate,
-          description: row.description,
-          direction,
-          amountMinorUnits: amount,
-          runningBalanceMinorUnits: moneyToMinorUnits(row.balance),
-          rowHash: `sha256:${createHash("sha256")
-            .update(JSON.stringify(row.rawRow))
-            .digest("hex")}`,
-          rawSourcePayload: row.rawRow
-        };
-      })
-    )
+    .values(values)
     .returning();
+}
+
+export async function updateTransactionCategory(
+  db: Db,
+  input: {
+    transactionId: string;
+    category: TransactionCategory | string;
+  }
+) {
+  if (!isTransactionCategory(input.category)) {
+    throw new Error("Invalid transaction category");
+  }
+
+  const [transaction] = await db
+    .update(transactions)
+    .set({
+      category: input.category,
+      categorySource: "manual"
+    })
+    .where(eq(transactions.id, input.transactionId))
+    .returning();
+
+  if (!transaction) {
+    throw new Error("Transaction not found");
+  }
+
+  await learnManualClassificationRule(db, {
+    description: transaction.description,
+    category: input.category
+  });
+
+  return transaction;
 }
 
 function moneyToMinorUnits(value: string) {

@@ -22,6 +22,27 @@
       "when": 1760000002000,
       "tag": "0002_money_columns_bigint",
       "breakpoints": true
+    },
+    {
+      "idx": 3,
+      "version": "7",
+      "when": 1760000003000,
+      "tag": "0003_transaction_categories",
+      "breakpoints": true
+    },
+    {
+      "idx": 4,
+      "version": "7",
+      "when": 1760000004000,
+      "tag": "0004_classification_knowledge",
+      "breakpoints": true
+    },
+    {
+      "idx": 5,
+      "version": "7",
+      "when": 1760000005000,
+      "tag": "0005_statement_specific_classification_backfill",
+      "breakpoints": false
     }
   ]
 }
