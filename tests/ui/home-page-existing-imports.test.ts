@@ -30,6 +30,11 @@ vi.mock("@/modules/imports/persistence", () => ({
     instrumentCount: 1,
     manualTransactionCount: 0
   })),
+  getMonthCloseStatus: vi.fn(async () => ({
+    month: "2026-04",
+    status: "open",
+    note: null
+  })),
   getMonthDashboards: vi.fn(async () => [
     {
       importBatch: {

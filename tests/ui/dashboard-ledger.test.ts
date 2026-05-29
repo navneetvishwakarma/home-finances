@@ -114,6 +114,24 @@ test("does not render a consolidated card for a single instrument", () => {
   expect(html).toContain("statement total");
 });
 
+test("hides transaction edit controls when a month is closed", () => {
+  const html = renderToStaticMarkup(
+    createElement(MonthDashboard, {
+      dashboards: [createDashboard("import-1", "icici-bank-april.csv", "icici-bank-csv")],
+      monthCloseStatus: {
+        month: "2026-04",
+        status: "closed",
+        note: "Reviewed"
+      }
+    })
+  );
+
+  expect(html).toContain("Month closed");
+  expect(html).not.toContain("Add transaction");
+  expect(html).not.toContain("Edit transaction");
+  expect(html).not.toContain("Delete transaction");
+});
+
 function createDashboard(
   importBatchId: string,
   filename: string,

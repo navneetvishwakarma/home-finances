@@ -3,6 +3,7 @@ import type { PostgresJsDatabase } from "drizzle-orm/postgres-js";
 import { accounts } from "@/db/schema";
 import { seedLocalClassificationKnowledge } from "@/modules/classification/persistence";
 import {
+  assertMonthsOpen,
   computeStatementTally,
   createAccount,
   getImportDashboard,
@@ -22,8 +23,16 @@ export async function runIciciCsvImport(
     rawCsv: string;
   }
 ) {
-  await seedLocalClassificationKnowledge(db);
   const parsed = parseSourceCsv(input.rawCsv);
+  if (input.ownerUserId) {
+    await assertMonthsOpen(
+      db,
+      parsed.rows.map((row) => row.transactionDate.slice(0, 7)),
+      input.ownerUserId
+    );
+  }
+
+  await seedLocalClassificationKnowledge(db);
   const account = await findOrCreateBankAccount(db, {
     displayName: input.accountDisplayName,
     ownerUserId: input.ownerUserId,

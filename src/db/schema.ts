@@ -107,6 +107,23 @@ export const statementTallies = pgTable(
   })
 );
 
+export const monthCloses = pgTable(
+  "month_closes",
+  {
+    id: uuid("id").primaryKey(),
+    ownerUserId: text("owner_user_id").notNull(),
+    month: text("month").notNull(),
+    status: text("status").notNull().default("closed"),
+    note: text("note"),
+    closedAt: timestamp("closed_at", { withTimezone: true }).notNull().defaultNow(),
+    closedBy: text("closed_by").notNull(),
+    reopenedAt: timestamp("reopened_at", { withTimezone: true })
+  },
+  (table) => ({
+    ownerMonthUnique: unique("month_closes_owner_month_unique").on(table.ownerUserId, table.month)
+  })
+);
+
 export const classificationDatasets = pgTable("classification_datasets", {
   id: uuid("id").primaryKey(),
   name: text("name").notNull(),

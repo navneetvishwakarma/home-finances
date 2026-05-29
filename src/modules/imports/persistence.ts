@@ -2,7 +2,7 @@ import { createHash, randomUUID } from "node:crypto";
 import { and, asc, desc, eq, gte, lt, sql } from "drizzle-orm";
 import type { AnyColumn } from "drizzle-orm";
 import type { PostgresJsDatabase } from "drizzle-orm/postgres-js";
-import { accounts, importBatches, statementTallies, transactions } from "@/db/schema";
+import { accounts, importBatches, monthCloses, statementTallies, transactions } from "@/db/schema";
 import {
   isTransactionCategory,
   type TransactionCategory
@@ -243,6 +243,20 @@ export async function updateTransactionCategory(
     throw new Error("Invalid transaction category");
   }
 
+  const [existingTransaction] = await db
+    .select()
+    .from(transactions)
+    .where(and(eq(transactions.id, input.transactionId), accountOwnerCondition(transactions.accountId, input.ownerUserId)))
+    .limit(1);
+
+  if (!existingTransaction) {
+    throw new Error("Transaction not found");
+  }
+
+  if (input.ownerUserId) {
+    await assertMonthOpen(db, existingTransaction.transactionDate.slice(0, 7), input.ownerUserId);
+  }
+
   const [transaction] = await db
     .update(transactions)
     .set({
@@ -251,10 +265,6 @@ export async function updateTransactionCategory(
     })
     .where(and(eq(transactions.id, input.transactionId), accountOwnerCondition(transactions.accountId, input.ownerUserId)))
     .returning();
-
-  if (!transaction) {
-    throw new Error("Transaction not found");
-  }
 
   await learnManualClassificationRule(db, {
     description: transaction.description,
@@ -278,6 +288,20 @@ export async function updateTransactionDetails(
     throw new Error("Invalid transaction category");
   }
 
+  const [existingTransaction] = await db
+    .select()
+    .from(transactions)
+    .where(and(eq(transactions.id, input.transactionId), accountOwnerCondition(transactions.accountId, input.ownerUserId)))
+    .limit(1);
+
+  if (!existingTransaction) {
+    throw new Error("Transaction not found");
+  }
+
+  if (input.ownerUserId) {
+    await assertMonthOpen(db, existingTransaction.transactionDate.slice(0, 7), input.ownerUserId);
+  }
+
   const [transaction] = await db
     .update(transactions)
     .set({
@@ -288,10 +312,6 @@ export async function updateTransactionDetails(
     })
     .where(and(eq(transactions.id, input.transactionId), accountOwnerCondition(transactions.accountId, input.ownerUserId)))
     .returning();
-
-  if (!transaction) {
-    throw new Error("Transaction not found");
-  }
 
   await learnManualClassificationRule(db, {
     description: transaction.description,
@@ -322,6 +342,7 @@ export async function createManualTransaction(
   const id = randomUUID();
   if (input.ownerUserId) {
     await requireOwnedAccount(db, input.accountId, input.ownerUserId);
+    await assertMonthOpen(db, input.transactionDate.slice(0, 7), input.ownerUserId);
   }
   const balance = await resolveManualRunningBalance(db, input);
 
@@ -444,15 +465,25 @@ export async function deleteTransaction(
     ownerUserId?: string;
   }
 ) {
+  const [existingTransaction] = await db
+    .select()
+    .from(transactions)
+    .where(and(eq(transactions.id, input.transactionId), accountOwnerCondition(transactions.accountId, input.ownerUserId)))
+    .limit(1);
+
+  if (!existingTransaction) {
+    throw new Error("Transaction not found");
+  }
+
+  if (input.ownerUserId) {
+    await assertMonthOpen(db, existingTransaction.transactionDate.slice(0, 7), input.ownerUserId);
+  }
+
   const [transaction] = await db
     .update(transactions)
     .set({ deletedAt: new Date() })
     .where(and(eq(transactions.id, input.transactionId), accountOwnerCondition(transactions.accountId, input.ownerUserId)))
     .returning();
-
-  if (!transaction) {
-    throw new Error("Transaction not found");
-  }
 
   return transaction;
 }
@@ -465,21 +496,46 @@ export async function deleteImportBatch(
   }
 ) {
   const [importBatch] = await db
-    .update(importBatches)
-    .set({ status: "deleted" })
+    .select()
+    .from(importBatches)
     .where(and(eq(importBatches.id, input.importBatchId), accountOwnerCondition(importBatches.accountId, input.ownerUserId)))
-    .returning();
+    .limit(1);
 
   if (!importBatch) {
     throw new Error("Import not found");
   }
 
+  if (input.ownerUserId) {
+    const batchTransactions = await db
+      .select({ transactionDate: transactions.transactionDate })
+      .from(transactions)
+      .where(
+        and(
+          eq(transactions.importBatchId, input.importBatchId),
+          sql`${transactions.deletedAt} IS NULL`,
+          accountOwnerCondition(transactions.accountId, input.ownerUserId)
+        )
+      );
+
+    await assertMonthsOpen(
+      db,
+      batchTransactions.map((transaction) => transaction.transactionDate.slice(0, 7)),
+      input.ownerUserId
+    );
+  }
+
+  const [deletedImportBatch] = await db
+    .update(importBatches)
+    .set({ status: "deleted" })
+    .where(and(eq(importBatches.id, input.importBatchId), accountOwnerCondition(importBatches.accountId, input.ownerUserId)))
+    .returning();
+
   await db
     .update(transactions)
     .set({ deletedAt: new Date() })
-    .where(eq(transactions.importBatchId, input.importBatchId));
+    .where(and(eq(transactions.importBatchId, input.importBatchId), accountOwnerCondition(transactions.accountId, input.ownerUserId)));
 
-  return importBatch;
+  return deletedImportBatch;
 }
 
 function moneyToMinorUnits(value: string) {
@@ -727,6 +783,112 @@ export async function getConsolidatedMonthTally(db: Db, month: string, ownerUser
     instrumentCount: new Set(ledgerRows.map((transaction) => transaction.accountId)).size,
     manualTransactionCount: ledgerRows.filter((transaction) => transaction.sourceType === "manual").length
   };
+}
+
+export async function closeMonth(
+  db: Db,
+  input: {
+    month: string;
+    ownerUserId: string;
+    note?: string;
+  }
+) {
+  const [monthClose] = await db
+    .insert(monthCloses)
+    .values({
+      id: randomUUID(),
+      ownerUserId: input.ownerUserId,
+      month: input.month,
+      status: "closed",
+      note: input.note,
+      closedBy: input.ownerUserId,
+      closedAt: new Date(),
+      reopenedAt: null
+    })
+    .onConflictDoUpdate({
+      target: [monthCloses.ownerUserId, monthCloses.month],
+      set: {
+        status: "closed",
+        note: input.note,
+        closedBy: input.ownerUserId,
+        closedAt: new Date(),
+        reopenedAt: null
+      }
+    })
+    .returning();
+
+  return monthClose;
+}
+
+export async function reopenMonth(
+  db: Db,
+  input: {
+    month: string;
+    ownerUserId: string;
+  }
+) {
+  const [monthClose] = await db
+    .update(monthCloses)
+    .set({
+      status: "reopened",
+      reopenedAt: new Date()
+    })
+    .where(and(eq(monthCloses.ownerUserId, input.ownerUserId), eq(monthCloses.month, input.month)))
+    .returning();
+
+  if (monthClose) {
+    return monthClose;
+  }
+
+  const [createdMonthClose] = await db
+    .insert(monthCloses)
+    .values({
+      id: randomUUID(),
+      ownerUserId: input.ownerUserId,
+      month: input.month,
+      status: "reopened",
+      closedBy: input.ownerUserId,
+      reopenedAt: new Date()
+    })
+    .returning();
+
+  return createdMonthClose;
+}
+
+export async function getMonthCloseStatus(db: Db, month: string, ownerUserId: string) {
+  const [monthClose] = await db
+    .select()
+    .from(monthCloses)
+    .where(and(eq(monthCloses.ownerUserId, ownerUserId), eq(monthCloses.month, month)))
+    .limit(1);
+
+  if (!monthClose || monthClose.status === "reopened") {
+    return {
+      month,
+      status: "open" as const,
+      note: monthClose?.note ?? null
+    };
+  }
+
+  return {
+    month,
+    status: "closed" as const,
+    note: monthClose.note
+  };
+}
+
+async function assertMonthOpen(db: Db, month: string, ownerUserId: string) {
+  const status = await getMonthCloseStatus(db, month, ownerUserId);
+
+  if (status.status === "closed") {
+    throw new Error("Month is closed. Reopen before making changes.");
+  }
+}
+
+export async function assertMonthsOpen(db: Db, months: Iterable<string>, ownerUserId: string) {
+  for (const month of Array.from(new Set(months))) {
+    await assertMonthOpen(db, month, ownerUserId);
+  }
 }
 
 export async function getMonthDashboards(db: Db, month: string, ownerUserId?: string) {

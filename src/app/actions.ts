@@ -6,9 +6,11 @@ import { requireCurrentUser } from "@/modules/auth/session";
 import { createServerSupabaseClient } from "@/modules/auth/supabase";
 import { runIciciCsvImport } from "@/modules/imports/import-flow";
 import {
+  closeMonth,
   createManualTransaction,
   deleteImportBatch,
   deleteTransaction,
+  reopenMonth,
   updateTransactionCategory,
   updateTransactionDetails
 } from "@/modules/imports/persistence";
@@ -113,6 +115,56 @@ export async function logoutAction() {
   const supabase = await createServerSupabaseClient();
   await supabase.auth.signOut();
   redirect("/?success=Signed%20out");
+}
+
+export async function closeMonthAction(formData: FormData) {
+  const currentUser = await requireCurrentUser();
+  const month = String(formData.get("month") || "");
+  const note = String(formData.get("note") || "").trim();
+
+  try {
+    if (!/^\d{4}-\d{2}$/.test(month)) {
+      throw new Error("Month is required");
+    }
+
+    if (note.length > 280) {
+      throw new Error("Close note must be 280 characters or fewer");
+    }
+
+    const db = await getMigratedDatabase();
+    await closeMonth(db, {
+      month,
+      note: note || undefined,
+      ownerUserId: currentUser.id
+    });
+  } catch (error) {
+    const message = error instanceof Error ? error.message : "Month close failed";
+    redirect(`/?month=${month}&error=${encodeURIComponent(message)}`);
+  }
+
+  redirect(`/?month=${month}&success=Month%20closed`);
+}
+
+export async function reopenMonthAction(formData: FormData) {
+  const currentUser = await requireCurrentUser();
+  const month = String(formData.get("month") || "");
+
+  try {
+    if (!/^\d{4}-\d{2}$/.test(month)) {
+      throw new Error("Month is required");
+    }
+
+    const db = await getMigratedDatabase();
+    await reopenMonth(db, {
+      month,
+      ownerUserId: currentUser.id
+    });
+  } catch (error) {
+    const message = error instanceof Error ? error.message : "Month reopen failed";
+    redirect(`/?month=${month}&error=${encodeURIComponent(message)}`);
+  }
+
+  redirect(`/?month=${month}&success=Month%20reopened`);
 }
 
 export async function updateTransactionCategoryAction(formData: FormData) {
