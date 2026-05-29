@@ -28,6 +28,7 @@ vi.mock("@/modules/imports/persistence", () => ({
     status: "open",
     note: null
   })),
+  getCategoryBreakdown: vi.fn(async () => []),
   getAccountMetadataSummary: vi.fn(async () => ({
     accountCount: 2,
     sourceProfiles: ["icici-bank-csv", "hdfc-bank-csv"],
@@ -190,4 +191,29 @@ test("renders structured multi-file import results in the toast stack", async ()
   expect(html).toContain("Already imported");
   expect(html).toContain("file3.csv");
   expect(html).toContain("This file format is not supported.");
+});
+
+test("passes the category URL filter into month dashboard loading", async () => {
+  const { getCurrentUser } = await import("@/modules/auth/session");
+  const persistence = await import("@/modules/imports/persistence");
+  vi.mocked(getCurrentUser).mockResolvedValueOnce({
+    id: "user-1",
+    email: "admin@example.com",
+    displayName: "Admin User",
+    role: "admin",
+    active: true,
+    createdAt: new Date(),
+    updatedAt: new Date()
+  });
+  vi.mocked(persistence.getAvailableLedgerMonths).mockResolvedValueOnce(["2026-04"]);
+  const { default: HomePage } = await import("@/app/page");
+
+  await HomePage({
+    searchParams: Promise.resolve({
+      month: "2026-04",
+      category: "food"
+    })
+  });
+
+  expect(persistence.getMonthDashboards).toHaveBeenCalledWith({}, "2026-04", "user-1", "food");
 });

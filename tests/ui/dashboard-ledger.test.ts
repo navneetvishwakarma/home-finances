@@ -77,7 +77,27 @@ test("renders a consolidated month dashboard with instrument sections", () => {
         netMovementMinorUnits: -70000,
         instrumentCount: 2,
         manualTransactionCount: 1
-      }
+      },
+      categoryBreakdown: [
+        {
+          category: "uncategorized",
+          label: "Uncategorized",
+          outgoingTotalMinorUnits: 50000,
+          incomingTotalMinorUnits: 0,
+          transactionCount: 1,
+          percentageOfTotalOutgoing: 20
+        },
+        {
+          category: "food",
+          label: "Food",
+          outgoingTotalMinorUnits: 200000,
+          incomingTotalMinorUnits: 0,
+          transactionCount: 3,
+          percentageOfTotalOutgoing: 80
+        }
+      ],
+      selectedMonth: "2026-04",
+      selectedCategory: "food"
     })
   );
 
@@ -91,6 +111,12 @@ test("renders a consolidated month dashboard with instrument sections", () => {
   expect(html).toContain("Credit card coverage");
   expect(html).toContain("2 billing files");
   expect(html).toContain("Instrument transactions");
+  expect(html).toContain("Spend by category");
+  expect(html).toContain("Review uncategorized");
+  expect(html).toContain("Clear filter");
+  expect(html).toContain("80.0%");
+  expect(html).toContain("3 transactions");
+  expect(html).toContain("/?month=2026-04&amp;category=food#all-instruments");
   expect(html).toContain("INR 1,250.00");
   expect(html).toContain("INR 1,950.00");
 });

@@ -25,6 +25,7 @@ import {
   deleteImportBatch,
   getAvailableLedgerMonths,
   getAccountManagementRows,
+  getCategoryBreakdown,
   getConsolidatedMonthTally,
   getMonthDashboards,
   getMonthCloseStatus,
@@ -1088,6 +1089,105 @@ test("computes a consolidated month tally across accounts including manual trans
     instrumentCount: 2,
     manualTransactionCount: 1
   });
+});
+
+test("computes monthly category spend totals and percentages", async () => {
+  const ownerUserId = "category-breakdown-owner";
+  const account = await createAccount(db, {
+    displayName: "Category Breakdown Account",
+    providerLabel: "Manual",
+    currency: "INR",
+    ownerUserId
+  });
+  await createManualTransaction(db, {
+    accountId: account.id,
+    transactionDate: "2026-04-05",
+    description: "Rent",
+    direction: "outgoing",
+    amountMinorUnits: 3000000,
+    category: "rent_home",
+    tags: [],
+    ownerUserId
+  });
+  await createManualTransaction(db, {
+    accountId: account.id,
+    transactionDate: "2026-04-06",
+    description: "Groceries",
+    direction: "outgoing",
+    amountMinorUnits: 1000000,
+    category: "food",
+    tags: [],
+    ownerUserId
+  });
+  await createManualTransaction(db, {
+    accountId: account.id,
+    transactionDate: "2026-04-07",
+    description: "Needs review",
+    direction: "outgoing",
+    amountMinorUnits: 500000,
+    category: "uncategorized",
+    tags: [],
+    ownerUserId
+  });
+  await createManualTransaction(db, {
+    accountId: account.id,
+    transactionDate: "2026-04-08",
+    description: "Salary",
+    direction: "incoming",
+    amountMinorUnits: 10000000,
+    category: "income",
+    tags: [],
+    ownerUserId
+  });
+
+  const breakdown = await getCategoryBreakdown(db, "2026-04", ownerUserId);
+
+  expect(breakdown).toEqual([
+    expect.objectContaining({
+      category: "uncategorized",
+      label: "Uncategorized",
+      outgoingTotalMinorUnits: 500000,
+      transactionCount: 1,
+      percentageOfTotalOutgoing: 11.1
+    }),
+    expect.objectContaining({
+      category: "rent_home",
+      label: "Rent & Home",
+      outgoingTotalMinorUnits: 3000000,
+      transactionCount: 1,
+      percentageOfTotalOutgoing: 66.7
+    }),
+    expect.objectContaining({
+      category: "food",
+      label: "Food",
+      outgoingTotalMinorUnits: 1000000,
+      incomingTotalMinorUnits: 0,
+      transactionCount: 1,
+      percentageOfTotalOutgoing: 22.2
+    })
+  ]);
+});
+
+test("returns no category spend breakdown when the month has no outgoing transactions", async () => {
+  const ownerUserId = "category-income-only-owner";
+  const account = await createAccount(db, {
+    displayName: "Income Only Account",
+    providerLabel: "Manual",
+    currency: "INR",
+    ownerUserId
+  });
+  await createManualTransaction(db, {
+    accountId: account.id,
+    transactionDate: "2026-06-01",
+    description: "Salary",
+    direction: "incoming",
+    amountMinorUnits: 10000000,
+    category: "income",
+    tags: [],
+    ownerUserId
+  });
+
+  await expect(getCategoryBreakdown(db, "2026-06", ownerUserId)).resolves.toEqual([]);
 });
 
 test("includes manual transactions in the selected month view", async () => {
