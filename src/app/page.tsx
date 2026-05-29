@@ -1,7 +1,14 @@
 import React from "react";
 import { Database, LogOut, ReceiptText, UserCircle } from "lucide-react";
 import { getMigratedDatabase } from "@/db/client";
-import { importIciciStatement, loginAction, logoutAction, signupAction } from "@/app/actions";
+import {
+  closeMonthAction,
+  importIciciStatement,
+  loginAction,
+  logoutAction,
+  reopenMonthAction,
+  signupAction
+} from "@/app/actions";
 import { getCurrentUser } from "@/modules/auth/session";
 import { MonthDashboard } from "@/modules/dashboard/DashboardLedger";
 import { ImportSubmitButton } from "@/modules/imports/ImportSubmitButton";
@@ -13,6 +20,7 @@ import {
   getImportDashboard,
   getLatestImportDashboards,
   getMonthDashboards,
+  getMonthCloseStatus,
   isCompleteImportDashboard
 } from "@/modules/imports/persistence";
 
@@ -47,6 +55,7 @@ export default async function HomePage({ searchParams }: { searchParams: SearchP
   const { availableMonths, selectedMonth } = loadedView;
   const loadedDashboards = loadedView.dashboards;
   const consolidatedTally = loadedView.consolidatedTally;
+  const monthCloseStatus = loadedView.monthCloseStatus;
   const dashboards = loadedDashboards.filter(isCompleteImportDashboard);
   const metadataSummary =
     selectedView === "metadata" ? await loadMetadataSummary(currentUser.id).catch(emptyMetadataSummary) : null;
@@ -78,6 +87,7 @@ export default async function HomePage({ searchParams }: { searchParams: SearchP
               availableMonths={availableMonths}
               consolidatedTally={consolidatedTally}
               dashboards={dashboards}
+              monthCloseStatus={monthCloseStatus}
               selectedMonth={selectedMonth}
             />
           )}
@@ -141,13 +151,17 @@ function TransactionsView({
   availableMonths,
   consolidatedTally,
   dashboards,
+  monthCloseStatus,
   selectedMonth
 }: {
   availableMonths: string[];
   consolidatedTally: Awaited<ReturnType<typeof getConsolidatedMonthTally>> | null;
   dashboards: CompleteImportDashboard[];
+  monthCloseStatus: Awaited<ReturnType<typeof getMonthCloseStatus>> | null;
   selectedMonth: string;
 }) {
+  const isClosed = monthCloseStatus?.status === "closed";
+
   return (
     <div className="workspace">
       <aside className="import-panel">
@@ -214,8 +228,29 @@ function TransactionsView({
             View
           </button>
         </form>
+        {dashboards.length > 0 && selectedMonth ? (
+          isClosed ? (
+            <form action={reopenMonthAction} className="month-view-selector" aria-label="Reopen month">
+              <input type="hidden" name="month" value={selectedMonth} />
+              <button type="submit">Reopen</button>
+            </form>
+          ) : (
+            <form action={closeMonthAction} className="month-view-selector" aria-label="Close month">
+              <input type="hidden" name="month" value={selectedMonth} />
+              <label>
+                <span>Close note</span>
+                <input name="note" maxLength={280} />
+              </label>
+              <button type="submit">Close month</button>
+            </form>
+          )
+        ) : null}
         {dashboards.length > 0 ? (
-          <MonthDashboard consolidatedTally={consolidatedTally} dashboards={dashboards} />
+          <MonthDashboard
+            consolidatedTally={consolidatedTally}
+            dashboards={dashboards}
+            monthCloseStatus={monthCloseStatus}
+          />
         ) : (
           <div className="empty-state">
             <p className="section-kicker">Month cockpit</p>
@@ -362,6 +397,7 @@ async function loadMonthView(params: Awaited<SearchParams>, ownerUserId: string)
       availableMonths,
       selectedMonth,
       consolidatedTally: await getConsolidatedMonthTally(db, selectedMonth, ownerUserId),
+      monthCloseStatus: await getMonthCloseStatus(db, selectedMonth, ownerUserId),
       dashboards: await getMonthDashboards(db, selectedMonth, ownerUserId)
     };
   }
@@ -370,6 +406,7 @@ async function loadMonthView(params: Awaited<SearchParams>, ownerUserId: string)
     availableMonths,
     selectedMonth,
     consolidatedTally: null,
+    monthCloseStatus: null,
     dashboards: await loadDashboards(params, ownerUserId)
   };
 }
@@ -380,7 +417,7 @@ async function loadMetadataSummary(ownerUserId: string) {
 }
 
 function emptyMonthView() {
-  return { availableMonths: [], selectedMonth: "", consolidatedTally: null, dashboards: [] };
+  return { availableMonths: [], selectedMonth: "", consolidatedTally: null, monthCloseStatus: null, dashboards: [] };
 }
 
 function emptyMetadataSummary() {

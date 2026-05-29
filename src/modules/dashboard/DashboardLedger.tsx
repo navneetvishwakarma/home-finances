@@ -27,15 +27,23 @@ import {
 
 type DashboardData = Awaited<ReturnType<typeof getImportDashboard>>;
 type ConsolidatedMonthTally = Awaited<ReturnType<typeof getConsolidatedMonthTally>>;
+type MonthCloseStatus = {
+  month: string;
+  status: "open" | "closed";
+  note?: string | null;
+};
 
 export function MonthDashboard({
   consolidatedTally,
-  dashboards
+  dashboards,
+  monthCloseStatus
 }: {
   consolidatedTally?: ConsolidatedMonthTally | null;
   dashboards: DashboardData[];
+  monthCloseStatus?: MonthCloseStatus | null;
 }) {
   const completeDashboards = dashboards.filter(isCompleteImportDashboard);
+  const isClosed = monthCloseStatus?.status === "closed";
   const totals = summarizeMonth(completeDashboards);
   const displayedTotals =
     consolidatedTally && consolidatedTally.instrumentCount >= 2 ? consolidatedTally : totals;
@@ -57,7 +65,11 @@ export function MonthDashboard({
           </p>
         </div>
         <span className="status-chip is-balanced">
-          {creditCardFileCount >= 2 ? `${creditCardFileCount} billing files` : "Card coverage pending"}
+          {isClosed
+            ? "Month closed"
+            : creditCardFileCount >= 2
+              ? `${creditCardFileCount} billing files`
+              : "Card coverage pending"}
         </span>
       </header>
 
@@ -104,7 +116,7 @@ export function MonthDashboard({
       <div className="instrument-stack">
         {completeDashboards.map((dashboard) => (
           <article id={`instrument-${dashboard.importBatch.id}`} className="instrument-panel" key={dashboard.importBatch.id}>
-            <DashboardLedger data={dashboard} />
+            <DashboardLedger data={dashboard} readOnly={isClosed} />
           </article>
         ))}
       </div>
@@ -112,7 +124,7 @@ export function MonthDashboard({
   );
 }
 
-export function DashboardLedger({ data }: { data: DashboardData }) {
+export function DashboardLedger({ data, readOnly = false }: { data: DashboardData; readOnly?: boolean }) {
   const differenceLabel = data.tally.differenceMinorUnits === 0 ? "Balanced" : "Difference";
   const confidenceLabel =
     data.tally.differenceMinorUnits === 0 ? "Confidence: exact match" : "Confidence: review needed";
@@ -133,7 +145,7 @@ export function DashboardLedger({ data }: { data: DashboardData }) {
           <span className={data.tally.differenceMinorUnits === 0 ? "status-chip is-balanced" : "status-chip is-review"}>
             {confidenceLabel}
           </span>
-          {isManualDashboard ? null : (
+          {readOnly || isManualDashboard ? null : (
             <details className="import-management">
               <summary aria-label="Manage import">
                 <MoreHorizontal aria-hidden="true" size={18} />
@@ -215,54 +227,56 @@ export function DashboardLedger({ data }: { data: DashboardData }) {
         <h2>Transaction stream</h2>
         <span>{data.transactions.length} rows imported</span>
       </div>
-      <details className="add-transaction-panel">
-        <summary className="add-transaction-trigger" aria-label="Add transaction">
-          <Plus aria-hidden="true" size={18} />
-          <span className="add-transaction-label">Add transaction</span>
-        </summary>
-        <form action={createManualTransactionAction} className="manual-transaction-form">
-          <input type="hidden" name="accountId" value={data.importBatch.accountId} />
-          <input type="hidden" name="importBatchId" value={data.importBatch.id} />
-          <label>
-            <span>Date</span>
-            <input name="transactionDate" type="date" required />
-          </label>
-          <label>
-            <span>Description</span>
-            <input name="description" placeholder="Manual transaction" required />
-          </label>
-          <label>
-            <span>Direction</span>
-            <select name="direction" defaultValue="outgoing">
-              <option value="outgoing">Outgoing</option>
-              <option value="incoming">Incoming</option>
-            </select>
-          </label>
-          <label>
-            <span>Amount</span>
-            <input name="amount" inputMode="decimal" placeholder="Amount" required />
-          </label>
-          <label>
-            <span>Running balance after this transaction</span>
-            <input name="runningBalance" inputMode="decimal" placeholder="Optional" />
-          </label>
-          <label>
-            <span>Category</span>
-            <select name="category" defaultValue="uncategorized">
-              {transactionCategories.map((category) => (
-                <option key={category.slug} value={category.slug}>
-                  {category.label}
-                </option>
-              ))}
-            </select>
-          </label>
-          <label>
-            <span>Tags</span>
-            <input name="tags" placeholder="Comma-separated tags" />
-          </label>
-          <button type="submit">Save transaction</button>
-        </form>
-      </details>
+      {readOnly ? null : (
+        <details className="add-transaction-panel">
+          <summary className="add-transaction-trigger" aria-label="Add transaction">
+            <Plus aria-hidden="true" size={18} />
+            <span className="add-transaction-label">Add transaction</span>
+          </summary>
+          <form action={createManualTransactionAction} className="manual-transaction-form">
+            <input type="hidden" name="accountId" value={data.importBatch.accountId} />
+            <input type="hidden" name="importBatchId" value={data.importBatch.id} />
+            <label>
+              <span>Date</span>
+              <input name="transactionDate" type="date" required />
+            </label>
+            <label>
+              <span>Description</span>
+              <input name="description" placeholder="Manual transaction" required />
+            </label>
+            <label>
+              <span>Direction</span>
+              <select name="direction" defaultValue="outgoing">
+                <option value="outgoing">Outgoing</option>
+                <option value="incoming">Incoming</option>
+              </select>
+            </label>
+            <label>
+              <span>Amount</span>
+              <input name="amount" inputMode="decimal" placeholder="Amount" required />
+            </label>
+            <label>
+              <span>Running balance after this transaction</span>
+              <input name="runningBalance" inputMode="decimal" placeholder="Optional" />
+            </label>
+            <label>
+              <span>Category</span>
+              <select name="category" defaultValue="uncategorized">
+                {transactionCategories.map((category) => (
+                  <option key={category.slug} value={category.slug}>
+                    {category.label}
+                  </option>
+                ))}
+              </select>
+            </label>
+            <label>
+              <span>Tags</span>
+              <input name="tags" placeholder="Comma-separated tags" />
+            </label>
+            <button type="submit">Save transaction</button>
+          </form>
+        </details>
+      )}
       <div className="ledger-record-list">
         {data.transactions.map((transaction) => (
           <details className="ledger-record" key={transaction.id}>
@@ -311,6 +325,7 @@ export function DashboardLedger({ data }: { data: DashboardData }) {
                   <dd>{transaction.sourceRowId ?? transaction.rowHash}</dd>
                 </div>
               </dl>
+              {readOnly ? null : (
               <div className="record-management-actions">
                 <details className="record-edit-panel">
                   <summary aria-label={`Edit transaction ${transaction.description}`}>
@@ -354,6 +369,7 @@ export function DashboardLedger({ data }: { data: DashboardData }) {
                   </ConfirmSubmitButton>
                 </form>
               </div>
+              )}
             </div>
           </details>
         ))}

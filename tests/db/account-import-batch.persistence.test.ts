@@ -6,7 +6,7 @@ import { afterAll, beforeAll, describe, expect, test } from "vitest";
 import postgres from "postgres";
 import { drizzle } from "drizzle-orm/postgres-js";
 import { migrate } from "drizzle-orm/postgres-js/migrator";
-import { accounts, importBatches, statementTallies, transactions } from "@/db/schema";
+import { accounts, importBatches, monthCloses, statementTallies, transactions } from "@/db/schema";
 import {
   computeStatementTally,
   createAccount,
@@ -17,11 +17,14 @@ import {
   updateTransactionDetails,
   createManualTransaction,
   backfillManualTransactionRunningBalances,
+  closeMonth,
   deleteTransaction,
   deleteImportBatch,
   getAvailableLedgerMonths,
   getConsolidatedMonthTally,
   getMonthDashboards,
+  getMonthCloseStatus,
+  reopenMonth,
   uploadIciciCsvForAccount
 } from "@/modules/imports/persistence";
 import { DashboardLedger } from "@/modules/dashboard/DashboardLedger";
@@ -36,6 +39,7 @@ const db = drizzle(client);
 
 beforeAll(async () => {
   await migrate(db, { migrationsFolder: "drizzle" });
+  await db.delete(monthCloses);
   await db.delete(statementTallies);
   await db.delete(transactions);
   await db.delete(importBatches);
@@ -1159,6 +1163,109 @@ test("scopes dashboard reads and transaction mutations to the authenticated owne
       ownerUserId: "user-a"
     } as any)
   ).rejects.toThrow("Transaction not found");
+});
+
+test("closes and reopens a month for an owner", async () => {
+  const closed = await closeMonth(db, {
+    month: "2026-04",
+    ownerUserId: "month-close-user",
+    note: "April reviewed"
+  });
+  const closedStatus = await getMonthCloseStatus(db, "2026-04", "month-close-user");
+  const reopened = await reopenMonth(db, {
+    month: "2026-04",
+    ownerUserId: "month-close-user"
+  });
+  const reopenedStatus = await getMonthCloseStatus(db, "2026-04", "month-close-user");
+
+  expect(closed).toMatchObject({
+    month: "2026-04",
+    ownerUserId: "month-close-user",
+    status: "closed",
+    note: "April reviewed"
+  });
+  expect(closedStatus.status).toBe("closed");
+  expect(reopened).toMatchObject({
+    month: "2026-04",
+    ownerUserId: "month-close-user",
+    status: "reopened"
+  });
+  expect(reopenedStatus.status).toBe("open");
+});
+
+test("rejects manual transaction creation when the month is closed", async () => {
+  const ownerUserId = "closed-month-mutation-user";
+  const account = await createAccount(db, {
+    displayName: "Closed Month Mutation Account",
+    providerLabel: "Manual",
+    currency: "INR",
+    ownerUserId
+  });
+  await closeMonth(db, {
+    month: "2026-04",
+    ownerUserId
+  });
+
+  await expect(
+    createManualTransaction(db, {
+      accountId: account.id,
+      transactionDate: "2026-04-10",
+      description: "Late cash expense",
+      direction: "outgoing",
+      amountMinorUnits: 10000,
+      category: "food",
+      tags: [],
+      ownerUserId
+    })
+  ).rejects.toThrow("Month is closed. Reopen before making changes.");
+});
+
+test("rejects transaction category updates when the month is closed", async () => {
+  const ownerUserId = "closed-month-update-user";
+  const account = await createAccount(db, {
+    displayName: "Closed Month Update Account",
+    providerLabel: "Manual",
+    currency: "INR",
+    ownerUserId
+  });
+  const transaction = await createManualTransaction(db, {
+    accountId: account.id,
+    transactionDate: "2026-04-10",
+    description: "Cash expense before close",
+    direction: "outgoing",
+    amountMinorUnits: 10000,
+    category: "food",
+    tags: [],
+    ownerUserId
+  });
+  await closeMonth(db, {
+    month: "2026-04",
+    ownerUserId
+  });
+
+  await expect(
+    updateTransactionCategory(db, {
+      transactionId: transaction.id,
+      category: "other",
+      ownerUserId
+    })
+  ).rejects.toThrow("Month is closed. Reopen before making changes.");
+});
+
+test("rejects imports when any parsed transaction month is closed", async () => {
+  await closeMonth(db, {
+    month: "2026-04",
+    ownerUserId: "closed-month-import-user"
+  });
+
+  await expect(
+    runIciciCsvImport(db, {
+      accountDisplayName: "Closed Month Import Account",
+      filename: "closed-month.csv",
+      rawCsv: await readFile("assets/sample/2604-icici-savings-statement.csv", "utf8"),
+      ownerUserId: "closed-month-import-user"
+    })
+  ).rejects.toThrow("Month is closed. Reopen before making changes.");
 });
 
 test("persists extracted statement metadata on the authenticated owner's account", async () => {

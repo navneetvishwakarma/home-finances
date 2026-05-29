@@ -4,6 +4,8 @@ const redirect = vi.fn((url: string) => {
   throw new Error(`REDIRECT:${url}`);
 });
 const createManualTransaction = vi.fn();
+const closeMonth = vi.fn();
+const reopenMonth = vi.fn();
 const runIciciCsvImport = vi.fn();
 
 vi.mock("next/navigation", () => ({
@@ -28,16 +30,55 @@ vi.mock("@/modules/imports/import-flow", () => ({
 
 vi.mock("@/modules/imports/persistence", () => ({
   createManualTransaction,
+  closeMonth,
   deleteImportBatch: vi.fn(),
   deleteTransaction: vi.fn(),
+  reopenMonth,
   updateTransactionCategory: vi.fn(),
   updateTransactionDetails: vi.fn()
 }));
 
 beforeEach(() => {
   redirect.mockClear();
+  closeMonth.mockReset();
   createManualTransaction.mockReset();
+  reopenMonth.mockReset();
   runIciciCsvImport.mockReset();
+});
+
+test("closeMonthAction closes the selected month and redirects back to it", async () => {
+  closeMonth.mockResolvedValueOnce({ month: "2026-04", status: "closed" });
+  const { closeMonthAction } = await import("@/app/actions");
+
+  await expect(
+    closeMonthAction(formData({ month: "2026-04", note: "Reviewed" }))
+  ).rejects.toThrow("REDIRECT:/?month=2026-04&success=Month%20closed");
+
+  expect(closeMonth).toHaveBeenCalledWith(
+    { db: true },
+    {
+      month: "2026-04",
+      note: "Reviewed",
+      ownerUserId: "user-1"
+    }
+  );
+});
+
+test("reopenMonthAction reopens the selected month and redirects back to it", async () => {
+  reopenMonth.mockResolvedValueOnce({ month: "2026-04", status: "reopened" });
+  const { reopenMonthAction } = await import("@/app/actions");
+
+  await expect(reopenMonthAction(formData({ month: "2026-04" }))).rejects.toThrow(
+    "REDIRECT:/?month=2026-04&success=Month%20reopened"
+  );
+
+  expect(reopenMonth).toHaveBeenCalledWith(
+    { db: true },
+    {
+      month: "2026-04",
+      ownerUserId: "user-1"
+    }
+  );
 });
 
 test("createManualTransactionAction passes through an optional running balance", async () => {

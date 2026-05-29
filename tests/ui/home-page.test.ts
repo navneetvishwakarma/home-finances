@@ -22,6 +22,11 @@ vi.mock("@/modules/imports/persistence", () => ({
     instrumentCount: 0,
     manualTransactionCount: 0
   })),
+  getMonthCloseStatus: vi.fn(async () => ({
+    month: "",
+    status: "open",
+    note: null
+  })),
   getAccountMetadataSummary: vi.fn(async () => ({
     accountCount: 2,
     sourceProfiles: ["icici-bank-csv", "hdfc-bank-csv"]
