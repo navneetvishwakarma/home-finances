@@ -11,6 +11,10 @@ vi.mock("@/modules/auth/session", () => ({
   getCurrentUser: vi.fn(async () => null)
 }));
 
+vi.mock("@/modules/transfers/persistence", () => ({
+  detectTransferCandidates: vi.fn(async () => [])
+}));
+
 vi.mock("@/modules/imports/persistence", () => ({
   getImportDashboard: vi.fn(),
   getLatestImportDashboards: vi.fn(async () => []),

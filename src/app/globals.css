@@ -1016,6 +1016,58 @@ select {
   text-align: right;
 }
 
+.transfer-review {
+  margin: 0 0 24px;
+  border: 1px solid rgba(37, 99, 235, 0.22);
+  border-radius: 8px;
+  padding: 14px;
+  background: #eff6ff;
+}
+
+.transfer-candidate-list {
+  display: grid;
+  gap: 10px;
+}
+
+.transfer-candidate {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 12px;
+  align-items: center;
+  border: 1px solid rgba(37, 99, 235, 0.22);
+  border-radius: 8px;
+  padding: 12px;
+  background: rgba(255, 255, 255, 0.78);
+}
+
+.transfer-candidate div:first-child {
+  display: grid;
+  gap: 4px;
+}
+
+.transfer-candidate span {
+  color: var(--muted);
+  font-size: 13px;
+  font-weight: 800;
+}
+
+.transfer-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.transfer-actions button {
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  padding: 8px 10px;
+  color: #323946;
+  background: rgba(255, 255, 255, 0.88);
+  font-size: 13px;
+  font-weight: 900;
+  cursor: pointer;
+}
+
 .instrument-stack {
   display: grid;
   gap: 18px;
@@ -1264,6 +1316,17 @@ select {
   font-weight: 800;
 }
 
+.transfer-badge {
+  justify-self: start;
+  border: 1px solid rgba(37, 99, 235, 0.24);
+  border-radius: 999px;
+  padding: 5px 8px;
+  color: var(--blue);
+  background: #eff6ff;
+  font-size: 12px;
+  font-weight: 900;
+}
+
 .record-chevron {
   color: var(--muted);
   transition: transform 180ms ease-out;
@@ -1433,6 +1496,10 @@ select {
 
   .spend-category-meta {
     text-align: left;
+  }
+
+  .transfer-candidate {
+    grid-template-columns: 1fr;
   }
 
   .month-view-selector {

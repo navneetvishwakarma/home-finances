@@ -10,7 +10,8 @@ import {
   classificationRules,
   importBatches,
   statementTallies,
-  transactions
+  transactions,
+  transferMatches
 } from "@/db/schema";
 import {
   createAccount,
@@ -31,6 +32,7 @@ describeDb("classification knowledge persistence", () => {
 
   beforeAll(async () => {
     await migrate(db, { migrationsFolder: "drizzle" });
+    await db.delete(transferMatches);
     await db.delete(statementTallies);
     await db.delete(transactions);
     await db.delete(importBatches);

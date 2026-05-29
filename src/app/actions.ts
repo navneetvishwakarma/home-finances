@@ -22,6 +22,7 @@ import {
   updateTransactionCategory,
   updateTransactionDetails
 } from "@/modules/imports/persistence";
+import { confirmTransfer, dismissTransfer } from "@/modules/transfers/persistence";
 
 export async function importIciciStatement(formData: FormData) {
   const currentUser = await requireCurrentUser();
@@ -266,6 +267,48 @@ export async function reactivateAccountAction(formData: FormData) {
   }
 
   redirect("/?view=metadata&success=Account%20reactivated");
+}
+
+export async function confirmTransferAction(formData: FormData) {
+  const currentUser = await requireCurrentUser();
+  const month = String(formData.get("month") || "");
+  const outgoingTransactionId = String(formData.get("outgoingTransactionId") || "");
+  const incomingTransactionId = String(formData.get("incomingTransactionId") || "");
+
+  try {
+    const db = await getMigratedDatabase();
+    await confirmTransfer(db, {
+      outgoingTransactionId,
+      incomingTransactionId,
+      ownerUserId: currentUser.id
+    });
+  } catch (error) {
+    const message = error instanceof Error ? error.message : "Transfer confirmation failed";
+    redirect(`/?month=${month}&error=${encodeURIComponent(message)}`);
+  }
+
+  redirect(`/?month=${month}&success=Transfer%20confirmed`);
+}
+
+export async function dismissTransferAction(formData: FormData) {
+  const currentUser = await requireCurrentUser();
+  const month = String(formData.get("month") || "");
+  const outgoingTransactionId = String(formData.get("outgoingTransactionId") || "");
+  const incomingTransactionId = String(formData.get("incomingTransactionId") || "");
+
+  try {
+    const db = await getMigratedDatabase();
+    await dismissTransfer(db, {
+      outgoingTransactionId,
+      incomingTransactionId,
+      ownerUserId: currentUser.id
+    });
+  } catch (error) {
+    const message = error instanceof Error ? error.message : "Transfer dismissal failed";
+    redirect(`/?month=${month}&error=${encodeURIComponent(message)}`);
+  }
+
+  redirect(`/?month=${month}&success=Transfer%20dismissed`);
 }
 
 export async function updateTransactionCategoryAction(formData: FormData) {

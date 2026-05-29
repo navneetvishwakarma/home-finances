@@ -81,6 +81,29 @@ export const transactions = pgTable(
   })
 );
 
+export const transferMatches = pgTable(
+  "transfer_matches",
+  {
+    id: uuid("id").primaryKey(),
+    outgoingTransactionId: uuid("outgoing_transaction_id")
+      .notNull()
+      .references(() => transactions.id),
+    incomingTransactionId: uuid("incoming_transaction_id")
+      .notNull()
+      .references(() => transactions.id),
+    confirmedAt: timestamp("confirmed_at", { withTimezone: true }),
+    confirmedBy: text("confirmed_by"),
+    dismissed: boolean("dismissed").notNull().default(false),
+    dismissedAt: timestamp("dismissed_at", { withTimezone: true })
+  },
+  (table) => ({
+    transferPairUnique: unique("transfer_matches_pair_unique").on(
+      table.outgoingTransactionId,
+      table.incomingTransactionId
+    )
+  })
+);
+
 export const statementTallies = pgTable(
   "statement_tallies",
   {
