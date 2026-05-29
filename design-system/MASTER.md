@@ -1,47 +1,90 @@
-# FinState Design System
+# Home Finances Glass Design System
 
 ## Direction
 
-FinState is a personal finance operations cockpit. The interface should feel precise, calm, and modern, with a futuristic layer created through crisp glass surfaces, dense data layout, and high-contrast financial signals.
+Home Finances is a private finance reconciliation cockpit, not a marketing site. The interface must feel calm, precise, and premium while staying dense enough for repeated review work. The visual language is sophisticated glass: layered translucent surfaces, graphite text, blue action accents, clear financial signals, and no decorative clutter.
 
-## Product Pattern
+## Principles
 
-- Primary experience: statement intake on the left, reconciliation workspace on the right.
-- First screen goal: upload a supported bank or card statement and immediately understand what the system will validate.
-- Dashboard goal: make balance confidence, cash movement, category totals, and transaction edits scan in that order.
+- Review first, manage second. Primary screens expose enough information to reconcile a month; low-frequency management actions live in expansion panels and overflow affordances.
+- Glass is functional depth. Use it to separate canvas, panels, records, and popovers without making the interface low contrast.
+- Finance signals stay consistent everywhere: incoming is emerald, outgoing is coral, warnings are amber, primary action is blue.
+- Components must map cleanly to web CSS, Apple SwiftUI, and Android Jetpack Compose tokens.
+- Motion supports orientation only. Use 150-240ms transitions for color, border, opacity, and shadow. Avoid decorative loops.
 
-## Visual System
+## Web CSS Tokens
 
-- Base: near-white canvas with graphite text for trustworthy financial clarity.
-- Surfaces: glass cards using translucent white, thin borders, and soft shadows.
-- Accent set: electric blue for primary action, emerald for positive and balanced states, amber for warnings, coral for errors.
-- Corners: 8px maximum on cards and controls.
-- Motion: subtle 150-240ms color, border, and shadow transitions only. Respect reduced motion.
+| Token | Value | Use |
+| --- | --- | --- |
+| `--font-sans` | `"Plus Jakarta Sans", Arial, Helvetica, sans-serif` | All UI text |
+| `--color-ink` | `#09090b` | Primary text |
+| `--color-muted` | `#525866` | Secondary text |
+| `--color-canvas` | `#f7f9fc` | App background |
+| `--color-panel` | `rgba(255, 255, 255, 0.78)` | Large glass panels |
+| `--surface-glass` | `linear-gradient(145deg, rgba(255,255,255,0.82), rgba(255,255,255,0.58))` | Cards and controls |
+| `--surface-solid` | `#ffffff` | Inputs and dense table surfaces |
+| `--line-glass` | `rgba(24, 24, 27, 0.12)` | Borders |
+| `--shadow-glass` | `0 24px 80px rgba(15, 23, 42, 0.10)` | Panels |
+| `--shadow-control` | `0 10px 28px rgba(37, 99, 235, 0.18)` | Primary action |
+| `--blur-glass` | `18px` | Backdrop blur |
+| `--focus-ring` | `0 0 0 3px rgba(37, 99, 235, 0.22)` | Keyboard focus |
+| `--radius-panel` | `8px` | Panels and repeated records |
+| `--radius-control` | `6px` | Inputs and buttons |
 
-## Typography
+## Apple Token Mapping
 
-- Preferred type: IBM Plex Sans.
-- Fallback: Arial, Helvetica, sans-serif.
-- Use compact headings inside panels. Reserve large text for the main workspace title only.
+| Web Token | SwiftUI Token |
+| --- | --- |
+| `--color-ink` | `Color.primary` with custom graphite asset |
+| `--color-muted` | `Color.secondary` with contrast check |
+| `--surface-glass` | `.ultraThinMaterial` over `Color("Canvas")` |
+| `--line-glass` | `Color.primary.opacity(0.12)` |
+| `--shadow-glass` | `.shadow(color: .black.opacity(0.10), radius: 32, y: 18)` |
+| `--radius-panel` | `.clipShape(RoundedRectangle(cornerRadius: 8))` |
 
-## UX Rules
+## Android Token Mapping
 
-- Show supported statement profiles before upload.
-- Keep the upload action visually dominant.
-- Use status chips for confidence and processing stage.
-- Put reconciliation metrics before tables.
-- Keep category editing inline so users do not lose ledger context.
-- Tables must remain horizontally scrollable on small screens.
-- Treat month close as the primary workflow: upload every file for the month first, then review one consolidated summary.
-- Use instrument-level tabs or anchored sections so bank accounts and credit card billing files remain separable after consolidation.
-- Visually encode incoming and outgoing money everywhere amounts appear. Incoming uses emerald treatment, outgoing uses coral treatment.
-- For credit cards, tell users that mid-month billing cycles usually require two adjacent statement files for a full calendar-month view.
+| Web Token | Jetpack Compose Token |
+| --- | --- |
+| `--color-ink` | `MaterialTheme.colorScheme.onSurface` |
+| `--color-muted` | `MaterialTheme.colorScheme.onSurfaceVariant` |
+| `--surface-glass` | `Surface` with translucent container color and blur backdrop where available |
+| `--line-glass` | `BorderStroke(1.dp, outlineVariant.copy(alpha = 0.12f))` |
+| `--shadow-glass` | `Modifier.shadow(24.dp, RoundedCornerShape(8.dp))` |
+| `--radius-control` | `RoundedCornerShape(6.dp)` |
+
+## Component Rules
+
+- App shell: max width 1320px, two-column desktop layout, single-column mobile below 900px.
+- Header: large page title only at top level. Panel headings stay compact.
+- Import panel: keep upload and account fields visible. Supported sources and coverage notes remain secondary sections.
+- Month selector: always visible at the top of the workspace. Disabled state must still explain no months exist.
+- Records: collapsed row shows Date, Description, Direction, Amount, Category. Expand reveals source identity, running balance, tags, edit, and delete.
+- Add transaction: icon-first action. On mobile, label is visually hidden and icon target remains 42px.
+- Danger actions: coral border/text, confirmation before submit.
+- Forms: labels always visible, inputs full width, no placeholder-only fields.
+
+## Accessibility Rules
+
+- Text contrast must meet 4.5:1 on glass surfaces.
+- Focus states use `--focus-ring` and must appear on buttons, selects, inputs, summary controls, and links.
+- Hover must not shift layout. Use color, border, and shadow changes only.
+- Respect `prefers-reduced-motion`.
+- All interactive records use semantic `details` and `summary`.
+- Mobile viewport 375px must have no horizontal page scroll. Dense internal tables may scroll inside their own container.
+
+## Responsive QA
+
+- 375px: login, upload, month selector, add transaction, expanded record actions.
+- 768px: one-column workspace, readable metric cards, no clipped buttons.
+- 1024px: two-column workspace may return if content has enough width.
+- 1440px: header, import panel, and dashboard remain visually connected within max-width.
 
 ## Avoid
 
-- Decorative continuous animation.
+- Dark mode by default.
+- Decorative blobs, bokeh, or one-note purple/blue gradients.
 - Emoji icons.
-- Low-contrast glass surfaces.
-- Marketing hero layout.
-- Nested cards.
-- A single-file mental model for month-close workflows.
+- Nested page cards.
+- Table-first layouts for mobile review.
+- Hiding finance data behind management controls.
