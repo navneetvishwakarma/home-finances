@@ -21,11 +21,13 @@ import {
 import {
   isCompleteImportDashboard,
   type CompleteImportDashboard,
+  type getCategoryBreakdown,
   type getConsolidatedMonthTally,
   type getImportDashboard
 } from "@/modules/imports/persistence";
 
 type DashboardData = Awaited<ReturnType<typeof getImportDashboard>>;
+type CategoryBreakdown = Awaited<ReturnType<typeof getCategoryBreakdown>>;
 type ConsolidatedMonthTally = Awaited<ReturnType<typeof getConsolidatedMonthTally>>;
 type MonthCloseStatus = {
   month: string;
@@ -34,13 +36,19 @@ type MonthCloseStatus = {
 };
 
 export function MonthDashboard({
+  categoryBreakdown = [],
   consolidatedTally,
   dashboards,
-  monthCloseStatus
+  monthCloseStatus,
+  selectedCategory = "",
+  selectedMonth = ""
 }: {
+  categoryBreakdown?: CategoryBreakdown;
   consolidatedTally?: ConsolidatedMonthTally | null;
   dashboards: DashboardData[];
   monthCloseStatus?: MonthCloseStatus | null;
+  selectedCategory?: string;
+  selectedMonth?: string;
 }) {
   const completeDashboards = dashboards.filter(isCompleteImportDashboard);
   const isClosed = monthCloseStatus?.status === "closed";
@@ -94,6 +102,11 @@ export function MonthDashboard({
       {showConsolidatedTally && consolidatedTally?.manualTransactionCount ? (
         <p className="batch-id">includes {consolidatedTally.manualTransactionCount} manual entry</p>
       ) : null}
+      <SpendByCategory
+        breakdown={categoryBreakdown}
+        selectedCategory={selectedCategory}
+        selectedMonth={selectedMonth || consolidatedTally?.month || ""}
+      />
 
       <nav className="instrument-tabs" aria-label="Instrument views">
         <a href="#all-instruments" className="is-active">
@@ -121,6 +134,52 @@ export function MonthDashboard({
         ))}
       </div>
     </section>
+  );
+}
+
+function SpendByCategory({
+  breakdown,
+  selectedCategory,
+  selectedMonth
+}: {
+  breakdown: CategoryBreakdown;
+  selectedCategory: string;
+  selectedMonth: string;
+}) {
+  if (breakdown.length === 0 || !selectedMonth) {
+    return null;
+  }
+
+  return (
+    <details className="spend-breakdown" open>
+      <summary>Spend by category</summary>
+      {selectedCategory ? (
+        <a className="clear-filter-link" href={`/?month=${selectedMonth}#all-instruments`}>
+          Clear filter
+        </a>
+      ) : null}
+      <div className="spend-breakdown-list">
+        {breakdown.map((category) => (
+          <a
+            className={category.category === selectedCategory ? "spend-category-row is-selected" : "spend-category-row"}
+            href={`/?month=${selectedMonth}&category=${category.category}#all-instruments`}
+            key={category.category}
+          >
+            <span className="spend-category-label">
+              <strong>{category.label}</strong>
+              {category.category === "uncategorized" ? <em>Review uncategorized</em> : null}
+            </span>
+            <span className="spend-category-bar" aria-hidden="true">
+              <span style={{ width: `${category.percentageOfTotalOutgoing}%` }} />
+            </span>
+            <span className="spend-category-meta">
+              {category.percentageOfTotalOutgoing.toFixed(1)}% · {formatMoney(category.outgoingTotalMinorUnits)} ·{" "}
+              {category.transactionCount} {category.transactionCount === 1 ? "transaction" : "transactions"}
+            </span>
+          </a>
+        ))}
+      </div>
+    </details>
   );
 }
 

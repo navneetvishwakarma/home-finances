@@ -4,6 +4,7 @@ import type { AnyColumn } from "drizzle-orm";
 import type { PostgresJsDatabase } from "drizzle-orm/postgres-js";
 import { accounts, importBatches, monthCloses, statementTallies, transactions } from "@/db/schema";
 import {
+  categoryLabel,
   isTransactionCategory,
   type TransactionCategory
 } from "@/modules/classification/categories";
@@ -902,6 +903,81 @@ export async function getConsolidatedMonthTally(db: Db, month: string, ownerUser
   };
 }
 
+export async function getCategoryBreakdown(db: Db, month: string, ownerUserId?: string) {
+  if (!/^\d{4}-\d{2}$/.test(month)) {
+    return [];
+  }
+
+  const startDate = `${month}-01`;
+  const endDate = nextMonthStart(month);
+  const ledgerRows = await db
+    .select({
+      category: transactions.category,
+      direction: transactions.direction,
+      amountMinorUnits: transactions.amountMinorUnits
+    })
+    .from(transactions)
+    .where(
+      and(
+        gte(transactions.transactionDate, startDate),
+        lt(transactions.transactionDate, endDate),
+        sql`${transactions.deletedAt} IS NULL`,
+        accountOwnerCondition(transactions.accountId, ownerUserId)
+      )
+    );
+  const totalOutgoingMinorUnits = ledgerRows
+    .filter((transaction) => transaction.direction === "outgoing")
+    .reduce((total, transaction) => total + transaction.amountMinorUnits, 0);
+
+  if (totalOutgoingMinorUnits === 0) {
+    return [];
+  }
+
+  const totals = new Map<
+    string,
+    {
+      category: string;
+      incomingTotalMinorUnits: number;
+      outgoingTotalMinorUnits: number;
+      transactionCount: number;
+    }
+  >();
+
+  for (const transaction of ledgerRows) {
+    const current = totals.get(transaction.category) ?? {
+      category: transaction.category,
+      incomingTotalMinorUnits: 0,
+      outgoingTotalMinorUnits: 0,
+      transactionCount: 0
+    };
+
+    current.transactionCount += 1;
+    if (transaction.direction === "incoming") {
+      current.incomingTotalMinorUnits += transaction.amountMinorUnits;
+    } else {
+      current.outgoingTotalMinorUnits += transaction.amountMinorUnits;
+    }
+    totals.set(transaction.category, current);
+  }
+
+  return [...totals.values()]
+    .filter((total) => total.outgoingTotalMinorUnits > 0)
+    .map((total) => ({
+      ...total,
+      label: categoryLabel(total.category),
+      percentageOfTotalOutgoing: Math.round((total.outgoingTotalMinorUnits / totalOutgoingMinorUnits) * 1000) / 10
+    }))
+    .sort((left, right) => {
+      if (left.category === "uncategorized") {
+        return -1;
+      }
+      if (right.category === "uncategorized") {
+        return 1;
+      }
+      return right.outgoingTotalMinorUnits - left.outgoingTotalMinorUnits;
+    });
+}
+
 export async function closeMonth(
   db: Db,
   input: {
@@ -1008,7 +1084,7 @@ export async function assertMonthsOpen(db: Db, months: Iterable<string>, ownerUs
   }
 }
 
-export async function getMonthDashboards(db: Db, month: string, ownerUserId?: string) {
+export async function getMonthDashboards(db: Db, month: string, ownerUserId?: string, category?: string) {
   if (!/^\d{4}-\d{2}$/.test(month)) {
     return [];
   }
@@ -1023,6 +1099,7 @@ export async function getMonthDashboards(db: Db, month: string, ownerUserId?: st
         gte(transactions.transactionDate, startDate),
         lt(transactions.transactionDate, endDate),
         sql`${transactions.deletedAt} IS NULL`,
+        category ? eq(transactions.category, category) : sql`true`,
         accountOwnerCondition(transactions.accountId, ownerUserId)
       )
     );

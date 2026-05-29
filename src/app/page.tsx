@@ -14,6 +14,7 @@ import {
 } from "@/app/actions";
 import { getCurrentUser } from "@/modules/auth/session";
 import { MonthDashboard } from "@/modules/dashboard/DashboardLedger";
+import { isTransactionCategory } from "@/modules/classification/categories";
 import { AccountNameInput } from "@/modules/imports/AccountNameInput";
 import { ImportSubmitButton } from "@/modules/imports/ImportSubmitButton";
 import {
@@ -24,6 +25,7 @@ import {
   type CompleteImportDashboard,
   getAccountMetadataSummary,
   getAvailableLedgerMonths,
+  getCategoryBreakdown,
   getConsolidatedMonthTally,
   getImportDashboard,
   getLatestImportDashboards,
@@ -41,6 +43,7 @@ type SearchParams = Promise<{
   error?: string;
   success?: string;
   importResults?: string;
+  category?: string;
   view?: string;
 }>;
 
@@ -64,7 +67,9 @@ export default async function HomePage({ searchParams }: { searchParams: SearchP
         })
       : emptyMonthView();
   const { availableMonths, selectedMonth } = loadedView;
+  const selectedCategory = loadedView.selectedCategory;
   const loadedDashboards = loadedView.dashboards;
+  const categoryBreakdown = loadedView.categoryBreakdown;
   const consolidatedTally = loadedView.consolidatedTally;
   const monthCloseStatus = loadedView.monthCloseStatus;
   const dashboards = loadedDashboards.filter(isCompleteImportDashboard);
@@ -96,9 +101,11 @@ export default async function HomePage({ searchParams }: { searchParams: SearchP
             <TransactionsView
               activeAccountNames={accountMetadata.activeAccountNames}
               availableMonths={availableMonths}
+              categoryBreakdown={categoryBreakdown}
               consolidatedTally={consolidatedTally}
               dashboards={dashboards}
               monthCloseStatus={monthCloseStatus}
+              selectedCategory={selectedCategory}
               selectedMonth={selectedMonth}
             />
           )}
@@ -179,16 +186,20 @@ function Toasts({
 function TransactionsView({
   activeAccountNames,
   availableMonths,
+  categoryBreakdown,
   consolidatedTally,
   dashboards,
   monthCloseStatus,
+  selectedCategory,
   selectedMonth
 }: {
   activeAccountNames: string[];
   availableMonths: string[];
+  categoryBreakdown: Awaited<ReturnType<typeof getCategoryBreakdown>>;
   consolidatedTally: Awaited<ReturnType<typeof getConsolidatedMonthTally>> | null;
   dashboards: CompleteImportDashboard[];
   monthCloseStatus: Awaited<ReturnType<typeof getMonthCloseStatus>> | null;
+  selectedCategory: string;
   selectedMonth: string;
 }) {
   const isClosed = monthCloseStatus?.status === "closed";
@@ -278,9 +289,12 @@ function TransactionsView({
         ) : null}
         {dashboards.length > 0 ? (
           <MonthDashboard
+            categoryBreakdown={categoryBreakdown}
             consolidatedTally={consolidatedTally}
             dashboards={dashboards}
             monthCloseStatus={monthCloseStatus}
+            selectedCategory={selectedCategory}
+            selectedMonth={selectedMonth}
           />
         ) : (
           <div className="empty-state">
@@ -494,20 +508,25 @@ async function loadMonthView(params: Awaited<SearchParams>, ownerUserId: string)
   const availableMonths = await getAvailableLedgerMonths(db, ownerUserId);
   const selectedMonth =
     params.month && availableMonths.includes(params.month) ? params.month : availableMonths[0] ?? "";
+  const selectedCategory = params.category && isTransactionCategory(params.category) ? params.category : "";
 
   if (selectedMonth) {
     return {
       availableMonths,
       selectedMonth,
+      selectedCategory,
+      categoryBreakdown: await getCategoryBreakdown(db, selectedMonth, ownerUserId),
       consolidatedTally: await getConsolidatedMonthTally(db, selectedMonth, ownerUserId),
       monthCloseStatus: await getMonthCloseStatus(db, selectedMonth, ownerUserId),
-      dashboards: await getMonthDashboards(db, selectedMonth, ownerUserId)
+      dashboards: await getMonthDashboards(db, selectedMonth, ownerUserId, selectedCategory || undefined)
     };
   }
 
   return {
     availableMonths,
     selectedMonth,
+    selectedCategory: "",
+    categoryBreakdown: [],
     consolidatedTally: null,
     monthCloseStatus: null,
     dashboards: await loadDashboards(params, ownerUserId)
@@ -520,7 +539,15 @@ async function loadMetadataSummary(ownerUserId: string) {
 }
 
 function emptyMonthView() {
-  return { availableMonths: [], selectedMonth: "", consolidatedTally: null, monthCloseStatus: null, dashboards: [] };
+  return {
+    availableMonths: [],
+    selectedMonth: "",
+    selectedCategory: "",
+    categoryBreakdown: [],
+    consolidatedTally: null,
+    monthCloseStatus: null,
+    dashboards: []
+  };
 }
 
 function emptyMetadataSummary() {
