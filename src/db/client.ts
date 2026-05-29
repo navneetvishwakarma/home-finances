@@ -10,7 +10,10 @@ let db: Database | undefined;
 let migration: Promise<void> | undefined;
 
 export function getDatabase() {
-  const url = process.env.DATABASE_URL ?? process.env.TEST_DATABASE_URL;
+  const url =
+    process.env.NODE_ENV === "test"
+      ? process.env.TEST_DATABASE_URL
+      : process.env.DATABASE_URL ?? process.env.TEST_DATABASE_URL;
 
   if (!url) {
     throw new Error("DATABASE_URL or TEST_DATABASE_URL is required");
