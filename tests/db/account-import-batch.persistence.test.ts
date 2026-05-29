@@ -11,8 +11,11 @@ import {
   computeStatementTally,
   createAccount,
   createImportBatch,
+  deactivateAccount,
   getImportDashboard,
   persistParsedTransactions,
+  reactivateAccount,
+  renameAccount,
   updateTransactionCategory,
   updateTransactionDetails,
   createManualTransaction,
@@ -21,6 +24,7 @@ import {
   deleteTransaction,
   deleteImportBatch,
   getAvailableLedgerMonths,
+  getAccountManagementRows,
   getConsolidatedMonthTally,
   getMonthDashboards,
   getMonthCloseStatus,
@@ -1287,5 +1291,93 @@ test("persists extracted statement metadata on the authenticated owner's account
     institutionName: "ICICI Bank",
     linkedAccountRef: "XXXXXXX11047"
   });
+});
+
+test("reuses an existing account when the import name differs only by case", async () => {
+  const ownerUserId = "case-insensitive-account-owner";
+  const existingAccount = await createAccount(db, {
+    displayName: "Primary Account",
+    providerLabel: "ICICI Bank",
+    currency: "INR",
+    ownerUserId
+  });
+
+  const dashboard = await runIciciCsvImport(db, {
+    accountDisplayName: "primary account",
+    filename: "case-insensitive-account.csv",
+    rawCsv: await readFile("assets/sample/2604-icici-savings-statement.csv", "utf8"),
+    ownerUserId
+  });
+  const ownerAccounts = await getAccountManagementRows(db, ownerUserId);
+
+  expect(dashboard.importBatch?.accountId).toBe(existingAccount.id);
+  expect(ownerAccounts).toHaveLength(1);
+});
+
+test("renames an owned account and rejects owner mismatches", async () => {
+  const account = await createAccount(db, {
+    displayName: "Old account name",
+    providerLabel: "ICICI Bank",
+    currency: "INR",
+    ownerUserId: "account-rename-owner"
+  });
+
+  const renamedAccount = await renameAccount(db, {
+    accountId: account.id,
+    displayName: "Primary savings",
+    ownerUserId: "account-rename-owner"
+  });
+
+  expect(renamedAccount.displayName).toBe("Primary savings");
+  await expect(
+    renameAccount(db, {
+      accountId: account.id,
+      displayName: "Intruder name",
+      ownerUserId: "account-rename-other-owner"
+    })
+  ).rejects.toThrow("Account not found");
+});
+
+test("deactivates and reactivates an account while preserving historical month views", async () => {
+  const ownerUserId = "account-active-owner";
+  const account = await createAccount(db, {
+    displayName: "Dormant savings",
+    providerLabel: "ICICI Bank",
+    currency: "INR",
+    ownerUserId
+  });
+  await createManualTransaction(db, {
+    accountId: account.id,
+    transactionDate: "2026-04-10",
+    description: "Historical expense",
+    direction: "outgoing",
+    amountMinorUnits: 25000,
+    category: "other",
+    tags: [],
+    ownerUserId
+  });
+
+  const deactivatedAccount = await deactivateAccount(db, {
+    accountId: account.id,
+    ownerUserId
+  });
+  const inactiveRows = await getAccountManagementRows(db, ownerUserId);
+  const historicalDashboards = await getMonthDashboards(db, "2026-04", ownerUserId);
+
+  expect(deactivatedAccount.active).toBe(false);
+  expect(inactiveRows.find((row) => row.id === account.id)).toMatchObject({
+    active: false,
+    transactionCount: 1
+  });
+  expect(historicalDashboards.flatMap((dashboard) => dashboard.transactions)).toEqual(
+    expect.arrayContaining([expect.objectContaining({ description: "Historical expense" })])
+  );
+
+  const reactivatedAccount = await reactivateAccount(db, {
+    accountId: account.id,
+    ownerUserId
+  });
+
+  expect(reactivatedAccount.active).toBe(true);
 });
 });

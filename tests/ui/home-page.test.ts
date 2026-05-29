@@ -29,7 +29,34 @@ vi.mock("@/modules/imports/persistence", () => ({
   })),
   getAccountMetadataSummary: vi.fn(async () => ({
     accountCount: 2,
-    sourceProfiles: ["icici-bank-csv", "hdfc-bank-csv"]
+    sourceProfiles: ["icici-bank-csv", "hdfc-bank-csv"],
+    activeAccountNames: ["Primary account"],
+    accounts: [
+      {
+        id: "account-1",
+        displayName: "Primary account",
+        providerLabel: "ICICI Bank",
+        accountType: "bank",
+        currency: "INR",
+        statementHolderName: "Admin User",
+        sourceProfiles: ["icici-bank-csv"],
+        transactionCount: 12,
+        lastImportedAt: new Date("2026-04-30T10:00:00.000Z"),
+        active: true
+      },
+      {
+        id: "account-2",
+        displayName: "Closed card",
+        providerLabel: "ICICI Bank",
+        accountType: "card",
+        currency: "INR",
+        statementHolderName: null,
+        sourceProfiles: ["hdfc-bank-csv"],
+        transactionCount: 4,
+        lastImportedAt: null,
+        active: false
+      }
+    ]
   })),
   getMonthDashboards: vi.fn(async () => []),
   isCompleteImportDashboard: vi.fn((dashboard) => Boolean(dashboard.importBatch && dashboard.tally))
@@ -81,6 +108,9 @@ test("renders the MVP 1 upload entry point for authenticated users", async () =>
   expect(html).toContain("Credit card coverage");
   expect(html).toContain("Supported sources");
   expect(html).toContain("Account name");
+  expect(html).toContain('list="account-name-suggestions"');
+  expect(html).toContain('<datalist id="account-name-suggestions">');
+  expect(html).toContain('<option value="Primary account"></option>');
   expect(html).toContain(".csv,text/csv,.txt,text/plain");
   expect(html).toContain("Import in progress");
   expect(html).toContain("Run import");
@@ -112,5 +142,16 @@ test("renders metadata view and success toast for authenticated users", async ()
   expect(html).toContain(">2<");
   expect(html).toContain("icici-bank-csv");
   expect(html).toContain("hdfc-bank-csv");
+  expect(html).toContain("Account register");
+  expect(html).toContain("Primary account");
+  expect(html).toContain("ICICI Bank");
+  expect(html).toContain("bank");
+  expect(html).toContain("INR");
+  expect(html).toContain("12 transactions");
+  expect(html).toContain("Active");
+  expect(html).toContain("Closed card");
+  expect(html).toContain("Inactive");
+  expect(html).toContain('name="displayName"');
+  expect(html).toContain('maxLength="80"');
   expect(html).not.toContain("Month cockpit");
 });

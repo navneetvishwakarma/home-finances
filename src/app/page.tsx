@@ -1,16 +1,20 @@
 import React from "react";
-import { Database, LogOut, ReceiptText, UserCircle } from "lucide-react";
+import { Check, Database, LogOut, Power, ReceiptText, RotateCcw, UserCircle } from "lucide-react";
 import { getMigratedDatabase } from "@/db/client";
 import {
   closeMonthAction,
+  deactivateAccountAction,
   importIciciStatement,
   loginAction,
   logoutAction,
+  reactivateAccountAction,
+  renameAccountAction,
   reopenMonthAction,
   signupAction
 } from "@/app/actions";
 import { getCurrentUser } from "@/modules/auth/session";
 import { MonthDashboard } from "@/modules/dashboard/DashboardLedger";
+import { AccountNameInput } from "@/modules/imports/AccountNameInput";
 import { ImportSubmitButton } from "@/modules/imports/ImportSubmitButton";
 import {
   type CompleteImportDashboard,
@@ -23,6 +27,8 @@ import {
   getMonthCloseStatus,
   isCompleteImportDashboard
 } from "@/modules/imports/persistence";
+
+type AccountMetadataSummary = Awaited<ReturnType<typeof getAccountMetadataSummary>>;
 
 type SearchParams = Promise<{
   importBatchId?: string;
@@ -57,8 +63,7 @@ export default async function HomePage({ searchParams }: { searchParams: SearchP
   const consolidatedTally = loadedView.consolidatedTally;
   const monthCloseStatus = loadedView.monthCloseStatus;
   const dashboards = loadedDashboards.filter(isCompleteImportDashboard);
-  const metadataSummary =
-    selectedView === "metadata" ? await loadMetadataSummary(currentUser.id).catch(emptyMetadataSummary) : null;
+  const accountMetadata = await loadMetadataSummary(currentUser.id).catch(emptyMetadataSummary);
 
   return (
     <main className="app-shell">
@@ -81,9 +86,10 @@ export default async function HomePage({ searchParams }: { searchParams: SearchP
           {selectedView === "profile" ? (
             <ProfileView currentUser={currentUser} />
           ) : selectedView === "metadata" ? (
-            <MetadataView summary={metadataSummary ?? { accountCount: 0, sourceProfiles: [] }} />
+            <MetadataView summary={accountMetadata} />
           ) : (
             <TransactionsView
+              activeAccountNames={accountMetadata.activeAccountNames}
               availableMonths={availableMonths}
               consolidatedTally={consolidatedTally}
               dashboards={dashboards}
@@ -148,12 +154,14 @@ function Toasts({ error, success }: { error?: string; success?: string }) {
 }
 
 function TransactionsView({
+  activeAccountNames,
   availableMonths,
   consolidatedTally,
   dashboards,
   monthCloseStatus,
   selectedMonth
 }: {
+  activeAccountNames: string[];
   availableMonths: string[];
   consolidatedTally: Awaited<ReturnType<typeof getConsolidatedMonthTally>> | null;
   dashboards: CompleteImportDashboard[];
@@ -184,7 +192,7 @@ function TransactionsView({
           </label>
           <label className="field">
             <span>Account name</span>
-            <input name="accountDisplayName" defaultValue="Primary account" required />
+            <AccountNameInput activeAccountNames={activeAccountNames} />
           </label>
           <label className="field">
             <span>Statement files</span>
@@ -288,7 +296,7 @@ function ProfileView({ currentUser }: { currentUser: Awaited<ReturnType<typeof g
   );
 }
 
-function MetadataView({ summary }: { summary: { accountCount: number; sourceProfiles: string[] } }) {
+function MetadataView({ summary }: { summary: AccountMetadataSummary }) {
   return (
     <section className="dashboard-panel utility-panel">
       <p className="section-kicker">Workspace metadata</p>
@@ -310,6 +318,78 @@ function MetadataView({ summary }: { summary: { accountCount: number; sourceProf
           <span>No statement sources imported yet</span>
         )}
       </div>
+      <section className="account-register" aria-labelledby="account-register-heading">
+        <div className="section-title-row">
+          <div>
+            <p className="section-kicker">Account register</p>
+            <h3 id="account-register-heading">Account register</h3>
+          </div>
+        </div>
+        {summary.accounts.length > 0 ? (
+          <div className="account-row-stack">
+            {summary.accounts.map((account) => (
+              <article className="account-row" key={account.id}>
+                <div className="account-row-main">
+                  <form action={renameAccountAction} className="account-rename-form">
+                    <input type="hidden" name="accountId" value={account.id} />
+                    <label>
+                      <span>Display name</span>
+                      <input name="displayName" defaultValue={account.displayName} required maxLength={80} />
+                    </label>
+                    <button type="submit" aria-label={`Rename ${account.displayName}`} title="Save name">
+                      <Check size={16} aria-hidden="true" />
+                    </button>
+                  </form>
+                  <dl className="account-facts">
+                    <div>
+                      <dt>Provider</dt>
+                      <dd>{account.providerLabel}</dd>
+                    </div>
+                    <div>
+                      <dt>Type</dt>
+                      <dd>{account.accountType}</dd>
+                    </div>
+                    <div>
+                      <dt>Currency</dt>
+                      <dd>{account.currency}</dd>
+                    </div>
+                    <div>
+                      <dt>Statement holder</dt>
+                      <dd>{account.statementHolderName ?? "Not captured"}</dd>
+                    </div>
+                    <div>
+                      <dt>Source profiles</dt>
+                      <dd>{account.sourceProfiles.length > 0 ? account.sourceProfiles.join(", ") : "None yet"}</dd>
+                    </div>
+                    <div>
+                      <dt>Transactions</dt>
+                      <dd>{account.transactionCount} {account.transactionCount === 1 ? "transaction" : "transactions"}</dd>
+                    </div>
+                    <div>
+                      <dt>Last imported</dt>
+                      <dd>{account.lastImportedAt ? formatDateTime(account.lastImportedAt) : "Never"}</dd>
+                    </div>
+                  </dl>
+                </div>
+                <div className="account-row-actions">
+                  <span className={account.active ? "status-chip is-balanced" : "status-chip is-muted"}>
+                    {account.active ? "Active" : "Inactive"}
+                  </span>
+                  <form action={account.active ? deactivateAccountAction : reactivateAccountAction}>
+                    <input type="hidden" name="accountId" value={account.id} />
+                    <button type="submit" aria-label={`${account.active ? "Deactivate" : "Reactivate"} ${account.displayName}`}>
+                      {account.active ? <Power size={16} aria-hidden="true" /> : <RotateCcw size={16} aria-hidden="true" />}
+                      {account.active ? "Deactivate" : "Reactivate"}
+                    </button>
+                  </form>
+                </div>
+              </article>
+            ))}
+          </div>
+        ) : (
+          <p className="empty-inline">No accounts imported yet</p>
+        )}
+      </section>
     </section>
   );
 }
@@ -421,7 +501,7 @@ function emptyMonthView() {
 }
 
 function emptyMetadataSummary() {
-  return { accountCount: 0, sourceProfiles: [] };
+  return { accountCount: 0, sourceProfiles: [], activeAccountNames: [], accounts: [] };
 }
 
 function pageTitle(view: "profile" | "transactions" | "metadata") {
@@ -449,4 +529,11 @@ function formatMonthLabel(month: string) {
     month: "long",
     year: "numeric"
   }).format(new Date(`${month}-01T00:00:00`));
+}
+
+function formatDateTime(value: Date) {
+  return new Intl.DateTimeFormat("en-US", {
+    dateStyle: "medium",
+    timeStyle: "short"
+  }).format(value);
 }
