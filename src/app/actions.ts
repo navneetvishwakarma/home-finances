@@ -30,6 +30,8 @@ export async function importIciciStatement(formData: FormData) {
   }
 
   const importedMonths = new Set<string>();
+  let importedRowCount = 0;
+  let skippedRowCount = 0;
 
   try {
     const db = await getMigratedDatabase();
@@ -40,6 +42,8 @@ export async function importIciciStatement(formData: FormData) {
         filename: statement.name,
         rawCsv: await statement.text()
       });
+      importedRowCount += dashboard.transactions.length;
+      skippedRowCount += dashboard.importBatch?.skippedRowCount ?? 0;
       for (const transaction of dashboard.transactions) {
         importedMonths.add(transaction.transactionDate.slice(0, 7));
       }
@@ -50,7 +54,8 @@ export async function importIciciStatement(formData: FormData) {
   }
 
   const latestImportedMonth = [...importedMonths].sort((left, right) => right.localeCompare(left))[0];
-  redirect(latestImportedMonth ? `/?month=${latestImportedMonth}&success=Import%20complete` : "/?success=Import%20complete");
+  const successMessage = importSuccessMessage(importedRowCount, skippedRowCount);
+  redirect(latestImportedMonth ? `/?month=${latestImportedMonth}&success=${successMessage}` : `/?success=${successMessage}`);
 }
 
 export async function loginAction(formData: FormData) {
@@ -263,4 +268,17 @@ function moneyToMinorUnits(value: string) {
 
   const [whole = "0", fraction = ""] = normalized.split(".");
   return Number(whole) * 100 + Number(fraction.padEnd(2, "0").slice(0, 2));
+}
+
+function importSuccessMessage(importedRowCount: number, skippedRowCount: number) {
+  if (skippedRowCount === 0) {
+    return "Import%20complete";
+  }
+
+  const importedLabel = importedRowCount === 1 ? "row imported" : "rows imported";
+  const skippedLabel = skippedRowCount === 1 ? "duplicate row skipped" : "duplicate rows skipped";
+
+  return encodeURIComponent(
+    `Import complete: ${importedRowCount} ${importedLabel}, ${skippedRowCount} ${skippedLabel}`
+  );
 }

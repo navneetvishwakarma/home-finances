@@ -26,6 +26,7 @@ export const importBatches = pgTable(
     fileFingerprint: text("file_fingerprint").notNull(),
     rawSource: text("raw_source").notNull(),
     status: text("status").notNull(),
+    skippedRowCount: integer("skipped_row_count").notNull().default(0),
     importedAt: timestamp("imported_at", { withTimezone: true }).notNull().defaultNow()
   },
   (table) => ({
@@ -57,6 +58,7 @@ export const transactions = pgTable(
     category: text("category").notNull().default("uncategorized"),
     categorySource: text("category_source").notNull().default("uncategorized"),
     sourceFingerprint: text("source_fingerprint").notNull(),
+    globalRowFingerprint: text("global_row_fingerprint").notNull(),
     rowHash: text("row_hash").notNull(),
     rawSourcePayload: jsonb("raw_source_payload").notNull(),
     tags: jsonb("tags").notNull().default([]),
@@ -67,6 +69,10 @@ export const transactions = pgTable(
     accountSourceFingerprintUnique: unique("transactions_account_source_fingerprint_unique").on(
       table.accountId,
       table.sourceFingerprint
+    ),
+    accountGlobalRowFingerprintUnique: unique("transactions_account_global_row_fingerprint_unique").on(
+      table.accountId,
+      table.globalRowFingerprint
     ),
     importBatchRowHashUnique: unique("transactions_import_batch_row_hash_unique").on(
       table.importBatchId,

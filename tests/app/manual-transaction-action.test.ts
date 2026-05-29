@@ -4,6 +4,7 @@ const redirect = vi.fn((url: string) => {
   throw new Error(`REDIRECT:${url}`);
 });
 const createManualTransaction = vi.fn();
+const runIciciCsvImport = vi.fn();
 
 vi.mock("next/navigation", () => ({
   redirect
@@ -22,7 +23,7 @@ vi.mock("@/modules/auth/supabase", () => ({
 }));
 
 vi.mock("@/modules/imports/import-flow", () => ({
-  runIciciCsvImport: vi.fn()
+  runIciciCsvImport
 }));
 
 vi.mock("@/modules/imports/persistence", () => ({
@@ -36,6 +37,7 @@ vi.mock("@/modules/imports/persistence", () => ({
 beforeEach(() => {
   redirect.mockClear();
   createManualTransaction.mockReset();
+  runIciciCsvImport.mockReset();
 });
 
 test("createManualTransactionAction passes through an optional running balance", async () => {
@@ -71,7 +73,32 @@ test("createManualTransactionAction passes through an optional running balance",
   );
 });
 
-function formData(values: Record<string, string>) {
+test("importIciciStatement includes skipped duplicate rows in the success redirect", async () => {
+  runIciciCsvImport.mockResolvedValueOnce({
+    importBatch: {
+      skippedRowCount: 3
+    },
+    transactions: [
+      {
+        transactionDate: "2026-04-30"
+      }
+    ]
+  });
+  const { importIciciStatement } = await import("@/app/actions");
+
+  await expect(
+    importIciciStatement(
+      formData({
+        accountDisplayName: "Primary account",
+        statements: new File(["csv"], "overlap.csv", { type: "text/csv" }) as any
+      })
+    )
+  ).rejects.toThrow(
+    "REDIRECT:/?month=2026-04&success=Import%20complete%3A%201%20row%20imported%2C%203%20duplicate%20rows%20skipped"
+  );
+});
+
+function formData(values: Record<string, string | File>) {
   const data = new FormData();
 
   for (const [key, value] of Object.entries(values)) {

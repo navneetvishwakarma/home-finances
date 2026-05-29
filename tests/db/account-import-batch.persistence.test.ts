@@ -509,6 +509,7 @@ test("backfills existing manual transaction running balances idempotently", asyn
     category: "food",
     categorySource: "manual",
     sourceFingerprint: "manual:backfill-balance",
+    globalRowFingerprint: "manual:backfill-balance",
     rowHash: "manual:backfill-balance",
     rawSourcePayload: { source: "manual" },
     tags: []
@@ -778,6 +779,170 @@ test("deduplicates source transactions across different import batches in a mont
     importBatchId: firstImportBatch.id,
     sourceType: "imported"
   });
+});
+
+test("skips duplicate transactions across import batches by global row fingerprint", async () => {
+  const account = await createAccount(db, {
+    displayName: "Global Row Fingerprint Duplicate Test",
+    providerLabel: "ICICI Bank",
+    currency: "INR"
+  });
+  const firstImportBatch = await createImportBatch(db, {
+    accountId: account.id,
+    sourceProfileId: "icici-bank-csv",
+    filename: "overlap-april.csv",
+    fileFingerprint: "sha256:overlap-april",
+    rawSource: "csv-content-one",
+    status: "uploaded"
+  });
+  const secondImportBatch = await createImportBatch(db, {
+    accountId: account.id,
+    sourceProfileId: "icici-bank-csv",
+    filename: "overlap-may.csv",
+    fileFingerprint: "sha256:overlap-may",
+    rawSource: "csv-content-two",
+    status: "uploaded"
+  });
+
+  const [firstTransaction] = await persistParsedTransactions(db, {
+    accountId: account.id,
+    importBatchId: firstImportBatch.id,
+    sourceProfileId: "icici-bank-csv",
+    rows: [
+      {
+        valueDate: "2026-04-30",
+        transactionDate: "2026-04-30",
+        description: "UPI GROCERY STORE",
+        withdrawalAmount: "1200.00",
+        depositAmount: "0.00",
+        balance: "10000.00",
+        rawRow: {
+          "S No.": "18",
+          "Transaction Remarks": "UPI GROCERY STORE",
+          "Withdrawal Amount(INR)": "1200.00",
+          "Deposit Amount(INR)": "0.00",
+          "Balance(INR)": "10000.00"
+        }
+      }
+    ]
+  });
+  const secondResult = await persistParsedTransactions(db, {
+    accountId: account.id,
+    importBatchId: secondImportBatch.id,
+    sourceProfileId: "icici-bank-csv",
+    rows: [
+      {
+        valueDate: "2026-04-30",
+        transactionDate: "2026-04-30",
+        description: "UPI GROCERY STORE",
+        withdrawalAmount: "1200.00",
+        depositAmount: "0.00",
+        balance: "10000.00",
+        rawRow: {
+          "S No.": "2",
+          "Transaction Remarks": "UPI GROCERY STORE",
+          "Withdrawal Amount(INR)": "1200.00",
+          "Deposit Amount(INR)": "0.00",
+          "Balance(INR)": "10000.00"
+        }
+      }
+    ]
+  });
+
+  const accountTransactions = await db
+    .select()
+    .from(transactions)
+    .where(eq(transactions.accountId, account.id));
+  const [updatedSecondBatch] = await db
+    .select()
+    .from(importBatches)
+    .where(eq(importBatches.id, secondImportBatch.id));
+
+  expect(secondResult).toHaveLength(0);
+  expect((secondResult as any).skippedCount).toBe(1);
+  expect(updatedSecondBatch).toMatchObject({ skippedRowCount: 1 });
+  expect(accountTransactions).toHaveLength(1);
+  expect(accountTransactions[0]).toMatchObject({
+    id: firstTransaction.id,
+    importBatchId: firstImportBatch.id
+  });
+
+  const duplicateOnlyTally = await computeStatementTally(db, {
+    accountId: account.id,
+    importBatchId: secondImportBatch.id
+  });
+
+  expect(duplicateOnlyTally).toMatchObject({
+    totalIncomingMinorUnits: 0,
+    totalOutgoingMinorUnits: 0,
+    netMovementMinorUnits: 0
+  });
+});
+
+test("does not globally dedupe same-day same-amount transactions with different running balances", async () => {
+  const account = await createAccount(db, {
+    displayName: "Global Row Fingerprint Tie Breaker Test",
+    providerLabel: "ICICI Bank",
+    currency: "INR"
+  });
+  const firstImportBatch = await createImportBatch(db, {
+    accountId: account.id,
+    sourceProfileId: "icici-bank-csv",
+    filename: "same-amount-one.csv",
+    fileFingerprint: "sha256:same-amount-one",
+    rawSource: "csv-content-one",
+    status: "uploaded"
+  });
+  const secondImportBatch = await createImportBatch(db, {
+    accountId: account.id,
+    sourceProfileId: "icici-bank-csv",
+    filename: "same-amount-two.csv",
+    fileFingerprint: "sha256:same-amount-two",
+    rawSource: "csv-content-two",
+    status: "uploaded"
+  });
+
+  await persistParsedTransactions(db, {
+    accountId: account.id,
+    importBatchId: firstImportBatch.id,
+    sourceProfileId: "icici-bank-csv",
+    rows: [
+      {
+        valueDate: "2026-04-30",
+        transactionDate: "2026-04-30",
+        description: "UPI GROCERY STORE",
+        withdrawalAmount: "1200.00",
+        depositAmount: "0.00",
+        balance: "10000.00",
+        rawRow: { "S No.": "18", "Transaction Remarks": "UPI GROCERY STORE" }
+      }
+    ]
+  });
+  const secondResult = await persistParsedTransactions(db, {
+    accountId: account.id,
+    importBatchId: secondImportBatch.id,
+    sourceProfileId: "icici-bank-csv",
+    rows: [
+      {
+        valueDate: "2026-04-30",
+        transactionDate: "2026-04-30",
+        description: "UPI GROCERY STORE",
+        withdrawalAmount: "1200.00",
+        depositAmount: "0.00",
+        balance: "98800.00",
+        rawRow: { "S No.": "19", "Transaction Remarks": "UPI GROCERY STORE" }
+      }
+    ]
+  });
+
+  const accountTransactions = await db
+    .select()
+    .from(transactions)
+    .where(eq(transactions.accountId, account.id));
+
+  expect(secondResult).toHaveLength(1);
+  expect((secondResult as any).skippedCount).toBe(0);
+  expect(accountTransactions).toHaveLength(2);
 });
 
 test("lists ledger months from active transaction dates with latest month first", async () => {
