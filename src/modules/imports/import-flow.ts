@@ -75,7 +75,7 @@ async function findOrCreateBankAccount(
     .select()
     .from(accounts)
     .where(
-      sql`${accounts.displayName} = ${input.displayName} AND ${accounts.ownerUserId} = ${input.ownerUserId ?? "legacy-local-user"}`
+      sql`lower(${accounts.displayName}) = ${input.displayName.toLocaleLowerCase()} AND ${accounts.ownerUserId} = ${input.ownerUserId ?? "legacy-local-user"}`
     )
     .limit(1);
 

@@ -592,6 +592,114 @@ select {
   font-weight: 800;
 }
 
+.duplicate-account-warning {
+  margin: 6px 0 0;
+  color: var(--amber);
+  font-size: 12px;
+  font-weight: 800;
+}
+
+.account-register {
+  display: grid;
+  gap: 12px;
+  margin-top: 28px;
+}
+
+.account-register h3 {
+  margin: 0;
+  font-size: 18px;
+}
+
+.account-row-stack {
+  display: grid;
+  gap: 12px;
+}
+
+.account-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 16px;
+  align-items: flex-start;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  padding: 16px;
+  background: var(--panel-strong);
+}
+
+.account-row-main {
+  display: grid;
+  gap: 12px;
+}
+
+.account-rename-form {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 40px;
+  gap: 8px;
+  align-items: end;
+}
+
+.account-rename-form button,
+.account-row-actions button {
+  display: inline-flex;
+  justify-content: center;
+  align-items: center;
+  gap: 8px;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  min-height: 40px;
+  padding: 8px 10px;
+  color: #323946;
+  background: rgba(255, 255, 255, 0.86);
+  font-size: 13px;
+  font-weight: 800;
+  cursor: pointer;
+}
+
+.account-facts {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 10px;
+  margin: 0;
+}
+
+.account-facts div {
+  min-width: 0;
+}
+
+.account-facts dt {
+  margin-bottom: 4px;
+  color: var(--muted);
+  font-size: 11px;
+  font-weight: 800;
+}
+
+.account-facts dd {
+  margin: 0;
+  color: var(--ink);
+  font-size: 13px;
+  font-weight: 800;
+  overflow-wrap: anywhere;
+}
+
+.account-row-actions {
+  display: grid;
+  justify-items: end;
+  gap: 10px;
+}
+
+.status-chip.is-muted {
+  border-color: var(--line);
+  color: var(--muted);
+  background: #f8fafc;
+}
+
+.empty-inline {
+  margin: 0;
+  color: var(--muted);
+  font-size: 13px;
+  font-weight: 800;
+}
+
 .empty-state {
   display: grid;
   min-height: 420px;
@@ -1168,7 +1276,9 @@ select {
   .consolidation-grid,
   .tally-grid,
   .preview-grid,
-  .metadata-grid {
+  .metadata-grid,
+  .account-row,
+  .account-facts {
     grid-template-columns: 1fr;
   }
 
@@ -1181,10 +1291,15 @@ select {
 
   .ledger-actions,
   .manual-transaction-form,
+  .account-rename-form,
   .month-view-selector {
     grid-template-columns: 1fr;
     justify-content: stretch;
     width: 100%;
+  }
+
+  .account-row-actions {
+    justify-items: stretch;
   }
 
   .month-view-selector {

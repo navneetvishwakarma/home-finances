@@ -8,8 +8,11 @@ import { runIciciCsvImport } from "@/modules/imports/import-flow";
 import {
   closeMonth,
   createManualTransaction,
+  deactivateAccount,
   deleteImportBatch,
   deleteTransaction,
+  reactivateAccount,
+  renameAccount,
   reopenMonth,
   updateTransactionCategory,
   updateTransactionDetails
@@ -165,6 +168,70 @@ export async function reopenMonthAction(formData: FormData) {
   }
 
   redirect(`/?month=${month}&success=Month%20reopened`);
+}
+
+export async function renameAccountAction(formData: FormData) {
+  const currentUser = await requireCurrentUser();
+  const accountId = String(formData.get("accountId") || "");
+  const displayName = String(formData.get("displayName") || "").trim();
+
+  try {
+    if (!displayName) {
+      throw new Error("Account name is required");
+    }
+
+    if (displayName.length > 80) {
+      throw new Error("Account name must be 80 characters or fewer");
+    }
+
+    const db = await getMigratedDatabase();
+    await renameAccount(db, {
+      accountId,
+      displayName,
+      ownerUserId: currentUser.id
+    });
+  } catch (error) {
+    const message = error instanceof Error ? error.message : "Account rename failed";
+    redirect(`/?view=metadata&error=${encodeURIComponent(message)}`);
+  }
+
+  redirect("/?view=metadata&success=Account%20renamed");
+}
+
+export async function deactivateAccountAction(formData: FormData) {
+  const currentUser = await requireCurrentUser();
+  const accountId = String(formData.get("accountId") || "");
+
+  try {
+    const db = await getMigratedDatabase();
+    await deactivateAccount(db, {
+      accountId,
+      ownerUserId: currentUser.id
+    });
+  } catch (error) {
+    const message = error instanceof Error ? error.message : "Account deactivate failed";
+    redirect(`/?view=metadata&error=${encodeURIComponent(message)}`);
+  }
+
+  redirect("/?view=metadata&success=Account%20deactivated");
+}
+
+export async function reactivateAccountAction(formData: FormData) {
+  const currentUser = await requireCurrentUser();
+  const accountId = String(formData.get("accountId") || "");
+
+  try {
+    const db = await getMigratedDatabase();
+    await reactivateAccount(db, {
+      accountId,
+      ownerUserId: currentUser.id
+    });
+  } catch (error) {
+    const message = error instanceof Error ? error.message : "Account reactivate failed";
+    redirect(`/?view=metadata&error=${encodeURIComponent(message)}`);
+  }
+
+  redirect("/?view=metadata&success=Account%20reactivated");
 }
 
 export async function updateTransactionCategoryAction(formData: FormData) {

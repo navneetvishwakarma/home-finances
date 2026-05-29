@@ -728,19 +728,135 @@ export async function getAvailableLedgerMonths(db: Db, ownerUserId?: string) {
 }
 
 export async function getAccountMetadataSummary(db: Db, ownerUserId?: string) {
-  const [accountCountRow] = await db
-    .select({ count: sql<number>`count(*)::int` })
-    .from(accounts)
-    .where(accountOwnerCondition(accounts.id, ownerUserId));
+  const accountRows = await getAccountManagementRows(db, ownerUserId);
   const profileRows = await db
     .select({ sourceProfileId: importBatches.sourceProfileId })
     .from(importBatches)
     .where(and(sql`${importBatches.status} <> 'deleted'`, accountOwnerCondition(importBatches.accountId, ownerUserId)));
 
   return {
-    accountCount: accountCountRow?.count ?? 0,
-    sourceProfiles: Array.from(new Set(profileRows.map((row) => row.sourceProfileId))).sort()
+    accountCount: accountRows.length,
+    sourceProfiles: Array.from(new Set(profileRows.map((row) => row.sourceProfileId))).sort(),
+    activeAccountNames: accountRows.filter((account) => account.active).map((account) => account.displayName),
+    accounts: accountRows
   };
+}
+
+export async function getAccountManagementRows(db: Db, ownerUserId?: string) {
+  const accountRows = await db
+    .select()
+    .from(accounts)
+    .where(accountOwnerCondition(accounts.id, ownerUserId))
+    .orderBy(asc(accounts.displayName), asc(accounts.createdAt));
+  const batchRows = await db
+    .select({
+      accountId: importBatches.accountId,
+      sourceProfileId: importBatches.sourceProfileId,
+      importedAt: importBatches.importedAt
+    })
+    .from(importBatches)
+    .where(and(sql`${importBatches.status} <> 'deleted'`, accountOwnerCondition(importBatches.accountId, ownerUserId)));
+  const transactionCountRows = await db
+    .select({
+      accountId: transactions.accountId,
+      count: sql<number>`count(*)::int`
+    })
+    .from(transactions)
+    .where(and(sql`${transactions.deletedAt} IS NULL`, accountOwnerCondition(transactions.accountId, ownerUserId)))
+    .groupBy(transactions.accountId);
+  const transactionCounts = new Map(transactionCountRows.map((row) => [row.accountId, row.count]));
+
+  return accountRows.map((account) => {
+    const accountBatches = batchRows.filter((batch) => batch.accountId === account.id);
+    const lastImportedAt =
+      accountBatches
+        .map((batch) => batch.importedAt)
+        .sort((left, right) => right.getTime() - left.getTime())[0] ?? null;
+
+    return {
+      id: account.id,
+      displayName: account.displayName,
+      providerLabel: account.providerLabel,
+      accountType: account.accountType,
+      currency: account.currency,
+      statementHolderName: account.statementHolderName,
+      sourceProfiles: Array.from(new Set(accountBatches.map((batch) => batch.sourceProfileId))).sort(),
+      transactionCount: transactionCounts.get(account.id) ?? 0,
+      lastImportedAt,
+      active: account.active
+    };
+  });
+}
+
+export async function renameAccount(
+  db: Db,
+  input: {
+    accountId: string;
+    displayName: string;
+    ownerUserId: string;
+  }
+) {
+  const displayName = input.displayName.trim();
+  if (!displayName) {
+    throw new Error("Account name is required");
+  }
+
+  if (displayName.length > 80) {
+    throw new Error("Account name must be 80 characters or fewer");
+  }
+
+  const [account] = await db
+    .update(accounts)
+    .set({ displayName })
+    .where(and(eq(accounts.id, input.accountId), eq(accounts.ownerUserId, input.ownerUserId)))
+    .returning();
+
+  if (!account) {
+    throw new Error("Account not found");
+  }
+
+  return account;
+}
+
+export async function deactivateAccount(
+  db: Db,
+  input: {
+    accountId: string;
+    ownerUserId: string;
+  }
+) {
+  return setAccountActive(db, input, false);
+}
+
+export async function reactivateAccount(
+  db: Db,
+  input: {
+    accountId: string;
+    ownerUserId: string;
+  }
+) {
+  return setAccountActive(db, input, true);
+}
+
+async function setAccountActive(
+  db: Db,
+  input: {
+    accountId: string;
+    ownerUserId: string;
+  },
+  active: boolean
+) {
+  const [account] = await db
+    .update(accounts)
+    .set({ active })
+    .where(and(eq(accounts.id, input.accountId), eq(accounts.ownerUserId, input.ownerUserId)))
+    .returning();
+
+  if (!account) {
+    throw new Error("Account not found");
+  }
+
+  return account;
 }
 
 export async function getConsolidatedMonthTally(db: Db, month: string, ownerUserId?: string) {

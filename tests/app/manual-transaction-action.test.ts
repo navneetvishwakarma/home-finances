@@ -5,6 +5,9 @@ const redirect = vi.fn((url: string) => {
 });
 const createManualTransaction = vi.fn();
 const closeMonth = vi.fn();
+const deactivateAccount = vi.fn();
+const reactivateAccount = vi.fn();
+const renameAccount = vi.fn();
 const reopenMonth = vi.fn();
 const runIciciCsvImport = vi.fn();
 
@@ -31,8 +34,11 @@ vi.mock("@/modules/imports/import-flow", () => ({
 vi.mock("@/modules/imports/persistence", () => ({
   createManualTransaction,
   closeMonth,
+  deactivateAccount,
   deleteImportBatch: vi.fn(),
   deleteTransaction: vi.fn(),
+  reactivateAccount,
+  renameAccount,
   reopenMonth,
   updateTransactionCategory: vi.fn(),
   updateTransactionDetails: vi.fn()
@@ -42,6 +48,9 @@ beforeEach(() => {
   redirect.mockClear();
   closeMonth.mockReset();
   createManualTransaction.mockReset();
+  deactivateAccount.mockReset();
+  reactivateAccount.mockReset();
+  renameAccount.mockReset();
   reopenMonth.mockReset();
   runIciciCsvImport.mockReset();
 });
@@ -111,6 +120,72 @@ test("createManualTransactionAction passes through an optional running balance",
       runningBalanceMinorUnits: 5820000,
       ownerUserId: "user-1"
     })
+  );
+});
+
+test("renameAccountAction validates and renames the owned account", async () => {
+  renameAccount.mockResolvedValueOnce({ id: "account-1", displayName: "Primary savings" });
+  const { renameAccountAction } = await import("@/app/actions");
+
+  await expect(
+    renameAccountAction(
+      formData({
+        accountId: "account-1",
+        displayName: "Primary savings"
+      })
+    )
+  ).rejects.toThrow("REDIRECT:/?view=metadata&success=Account%20renamed");
+
+  expect(renameAccount).toHaveBeenCalledWith(
+    { db: true },
+    {
+      accountId: "account-1",
+      displayName: "Primary savings",
+      ownerUserId: "user-1"
+    }
+  );
+});
+
+test("renameAccountAction rejects invalid names", async () => {
+  const { renameAccountAction } = await import("@/app/actions");
+
+  await expect(
+    renameAccountAction(
+      formData({
+        accountId: "account-1",
+        displayName: ""
+      })
+    )
+  ).rejects.toThrow("REDIRECT:/?view=metadata&error=Account%20name%20is%20required");
+
+  expect(renameAccount).not.toHaveBeenCalled();
+});
+
+test("deactivateAccountAction and reactivateAccountAction toggle account status", async () => {
+  deactivateAccount.mockResolvedValueOnce({ id: "account-1", active: false });
+  reactivateAccount.mockResolvedValueOnce({ id: "account-1", active: true });
+  const { deactivateAccountAction, reactivateAccountAction } = await import("@/app/actions");
+
+  await expect(deactivateAccountAction(formData({ accountId: "account-1" }))).rejects.toThrow(
+    "REDIRECT:/?view=metadata&success=Account%20deactivated"
+  );
+  await expect(reactivateAccountAction(formData({ accountId: "account-1" }))).rejects.toThrow(
+    "REDIRECT:/?view=metadata&success=Account%20reactivated"
+  );
+
+  expect(deactivateAccount).toHaveBeenCalledWith(
+    { db: true },
+    {
+      accountId: "account-1",
+      ownerUserId: "user-1"
+    }
+  );
+  expect(reactivateAccount).toHaveBeenCalledWith(
+    { db: true },
+    {
+      accountId: "account-1",
+      ownerUserId: "user-1"
+    }
   );
 });
 
