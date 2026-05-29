@@ -6,7 +6,7 @@ import { afterAll, beforeAll, describe, expect, test } from "vitest";
 import postgres from "postgres";
 import { drizzle } from "drizzle-orm/postgres-js";
 import { migrate } from "drizzle-orm/postgres-js/migrator";
-import { accounts, importBatches, monthCloses, statementTallies, transactions } from "@/db/schema";
+import { accounts, importBatches, monthCloses, statementTallies, transactions, transferMatches } from "@/db/schema";
 import {
   computeStatementTally,
   createAccount,
@@ -35,6 +35,11 @@ import {
 import { DashboardLedger } from "@/modules/dashboard/DashboardLedger";
 import { runIciciCsvImport } from "@/modules/imports/import-flow";
 import { parseSourceCsv } from "@/modules/source-profiles/registry";
+import {
+  confirmTransfer,
+  detectTransferCandidates,
+  dismissTransfer
+} from "@/modules/transfers/persistence";
 
 const describeDb = process.env.TEST_DATABASE_URL ? describe : describe.skip;
 
@@ -44,6 +49,7 @@ const db = drizzle(client);
 
 beforeAll(async () => {
   await migrate(db, { migrationsFolder: "drizzle" });
+  await db.delete(transferMatches);
   await db.delete(monthCloses);
   await db.delete(statementTallies);
   await db.delete(transactions);
@@ -1088,6 +1094,341 @@ test("computes a consolidated month tally across accounts including manual trans
     netMovementMinorUnits: 6700000,
     instrumentCount: 2,
     manualTransactionCount: 1
+  });
+});
+
+test("detects transfer candidates across owned accounts within the date window", async () => {
+  const ownerUserId = "transfer-candidate-owner";
+  const savings = await createAccount(db, {
+    displayName: "Savings",
+    providerLabel: "ICICI Bank",
+    currency: "INR",
+    ownerUserId
+  });
+  const card = await createAccount(db, {
+    displayName: "Credit card",
+    providerLabel: "ICICI Card",
+    currency: "INR",
+    ownerUserId
+  });
+  await createManualTransaction(db, {
+    accountId: savings.id,
+    transactionDate: "2026-04-05",
+    description: "CARD PAYMENT",
+    direction: "outgoing",
+    amountMinorUnits: 5000000,
+    category: "transfers",
+    tags: [],
+    ownerUserId
+  });
+  await createManualTransaction(db, {
+    accountId: card.id,
+    transactionDate: "2026-04-06",
+    description: "PAYMENT RECEIVED",
+    direction: "incoming",
+    amountMinorUnits: 5000000,
+    category: "transfers",
+    tags: [],
+    ownerUserId
+  });
+
+  const candidates = await detectTransferCandidates(db, "2026-04", ownerUserId);
+
+  expect(candidates).toHaveLength(1);
+  expect(candidates[0]).toMatchObject({
+    outgoingAccountName: "Savings",
+    incomingAccountName: "Credit card",
+    amountMinorUnits: 5000000,
+    dayDifference: 1
+  });
+});
+
+test("does not detect transfer candidates outside the date window", async () => {
+  const ownerUserId = "transfer-window-owner";
+  const savings = await createAccount(db, {
+    displayName: "Window Savings",
+    providerLabel: "ICICI Bank",
+    currency: "INR",
+    ownerUserId
+  });
+  const card = await createAccount(db, {
+    displayName: "Window Card",
+    providerLabel: "ICICI Card",
+    currency: "INR",
+    ownerUserId
+  });
+  await createManualTransaction(db, {
+    accountId: savings.id,
+    transactionDate: "2026-04-05",
+    description: "CARD PAYMENT",
+    direction: "outgoing",
+    amountMinorUnits: 5000000,
+    category: "transfers",
+    tags: [],
+    ownerUserId
+  });
+  await createManualTransaction(db, {
+    accountId: card.id,
+    transactionDate: "2026-04-08",
+    description: "PAYMENT RECEIVED",
+    direction: "incoming",
+    amountMinorUnits: 5000000,
+    category: "transfers",
+    tags: [],
+    ownerUserId
+  });
+
+  await expect(detectTransferCandidates(db, "2026-04", ownerUserId)).resolves.toEqual([]);
+});
+
+test("does not detect transfer candidates when amounts differ", async () => {
+  const ownerUserId = "transfer-amount-owner";
+  const savings = await createAccount(db, {
+    displayName: "Amount Savings",
+    providerLabel: "ICICI Bank",
+    currency: "INR",
+    ownerUserId
+  });
+  const card = await createAccount(db, {
+    displayName: "Amount Card",
+    providerLabel: "ICICI Card",
+    currency: "INR",
+    ownerUserId
+  });
+  await createManualTransaction(db, {
+    accountId: savings.id,
+    transactionDate: "2026-04-05",
+    description: "CARD PAYMENT",
+    direction: "outgoing",
+    amountMinorUnits: 5000000,
+    category: "transfers",
+    tags: [],
+    ownerUserId
+  });
+  await createManualTransaction(db, {
+    accountId: card.id,
+    transactionDate: "2026-04-05",
+    description: "PAYMENT RECEIVED",
+    direction: "incoming",
+    amountMinorUnits: 4999000,
+    category: "transfers",
+    tags: [],
+    ownerUserId
+  });
+
+  await expect(detectTransferCandidates(db, "2026-04", ownerUserId)).resolves.toEqual([]);
+});
+
+test("persists confirmed transfers and suppresses the matched pair from future candidates", async () => {
+  const ownerUserId = "transfer-confirm-owner";
+  const savings = await createAccount(db, {
+    displayName: "Confirm Savings",
+    providerLabel: "ICICI Bank",
+    currency: "INR",
+    ownerUserId
+  });
+  const card = await createAccount(db, {
+    displayName: "Confirm Card",
+    providerLabel: "ICICI Card",
+    currency: "INR",
+    ownerUserId
+  });
+  const outgoing = await createManualTransaction(db, {
+    accountId: savings.id,
+    transactionDate: "2026-04-05",
+    description: "CARD PAYMENT",
+    direction: "outgoing",
+    amountMinorUnits: 5000000,
+    category: "transfers",
+    tags: [],
+    ownerUserId
+  });
+  const incoming = await createManualTransaction(db, {
+    accountId: card.id,
+    transactionDate: "2026-04-05",
+    description: "PAYMENT RECEIVED",
+    direction: "incoming",
+    amountMinorUnits: 5000000,
+    category: "transfers",
+    tags: [],
+    ownerUserId
+  });
+
+  const match = await confirmTransfer(db, {
+    outgoingTransactionId: outgoing.id,
+    incomingTransactionId: incoming.id,
+    ownerUserId
+  });
+  const [persistedMatch] = await db
+    .select()
+    .from(transferMatches)
+    .where(eq(transferMatches.id, match.id));
+
+  expect(persistedMatch).toMatchObject({
+    outgoingTransactionId: outgoing.id,
+    incomingTransactionId: incoming.id,
+    confirmedBy: ownerUserId,
+    dismissed: false
+  });
+  expect(persistedMatch.confirmedAt).toBeInstanceOf(Date);
+  await expect(detectTransferCandidates(db, "2026-04", ownerUserId)).resolves.toEqual([]);
+});
+
+test("surfaces only the closest incoming match for the same outgoing transaction", async () => {
+  const ownerUserId = "transfer-closest-owner";
+  const savings = await createAccount(db, {
+    displayName: "Closest Savings",
+    providerLabel: "ICICI Bank",
+    currency: "INR",
+    ownerUserId
+  });
+  const card = await createAccount(db, {
+    displayName: "Closest Card",
+    providerLabel: "ICICI Card",
+    currency: "INR",
+    ownerUserId
+  });
+  await createManualTransaction(db, {
+    accountId: savings.id,
+    transactionDate: "2026-04-05",
+    description: "CARD PAYMENT",
+    direction: "outgoing",
+    amountMinorUnits: 5000000,
+    category: "transfers",
+    tags: [],
+    ownerUserId
+  });
+  await createManualTransaction(db, {
+    accountId: card.id,
+    transactionDate: "2026-04-07",
+    description: "OLDER POSSIBLE PAYMENT",
+    direction: "incoming",
+    amountMinorUnits: 5000000,
+    category: "transfers",
+    tags: [],
+    ownerUserId
+  });
+  await createManualTransaction(db, {
+    accountId: card.id,
+    transactionDate: "2026-04-06",
+    description: "CLOSEST PAYMENT",
+    direction: "incoming",
+    amountMinorUnits: 5000000,
+    category: "transfers",
+    tags: [],
+    ownerUserId
+  });
+
+  const candidates = await detectTransferCandidates(db, "2026-04", ownerUserId);
+
+  expect(candidates).toHaveLength(1);
+  expect(candidates[0]).toMatchObject({
+    incomingDate: "2026-04-06",
+    dayDifference: 1
+  });
+});
+
+test("confirmed and dismissed transfers are not surfaced as candidates", async () => {
+  const ownerUserId = "transfer-dismiss-owner";
+  const savings = await createAccount(db, {
+    displayName: "Dismiss Savings",
+    providerLabel: "ICICI Bank",
+    currency: "INR",
+    ownerUserId
+  });
+  const card = await createAccount(db, {
+    displayName: "Dismiss Card",
+    providerLabel: "ICICI Card",
+    currency: "INR",
+    ownerUserId
+  });
+  const outgoing = await createManualTransaction(db, {
+    accountId: savings.id,
+    transactionDate: "2026-04-05",
+    description: "CARD PAYMENT",
+    direction: "outgoing",
+    amountMinorUnits: 5000000,
+    category: "transfers",
+    tags: [],
+    ownerUserId
+  });
+  const incoming = await createManualTransaction(db, {
+    accountId: card.id,
+    transactionDate: "2026-04-05",
+    description: "PAYMENT RECEIVED",
+    direction: "incoming",
+    amountMinorUnits: 5000000,
+    category: "transfers",
+    tags: [],
+    ownerUserId
+  });
+
+  await dismissTransfer(db, {
+    outgoingTransactionId: outgoing.id,
+    incomingTransactionId: incoming.id,
+    ownerUserId
+  });
+
+  await expect(detectTransferCandidates(db, "2026-04", ownerUserId)).resolves.toEqual([]);
+});
+
+test("confirmed transfers are neutralized in consolidated month tally", async () => {
+  const ownerUserId = "transfer-neutralized-owner";
+  const savings = await createAccount(db, {
+    displayName: "Neutral Savings",
+    providerLabel: "ICICI Bank",
+    currency: "INR",
+    ownerUserId
+  });
+  const card = await createAccount(db, {
+    displayName: "Neutral Card",
+    providerLabel: "ICICI Card",
+    currency: "INR",
+    ownerUserId
+  });
+  const outgoing = await createManualTransaction(db, {
+    accountId: savings.id,
+    transactionDate: "2026-04-05",
+    description: "CARD PAYMENT",
+    direction: "outgoing",
+    amountMinorUnits: 5000000,
+    category: "transfers",
+    tags: [],
+    ownerUserId
+  });
+  const incoming = await createManualTransaction(db, {
+    accountId: card.id,
+    transactionDate: "2026-04-05",
+    description: "PAYMENT RECEIVED",
+    direction: "incoming",
+    amountMinorUnits: 5000000,
+    category: "transfers",
+    tags: [],
+    ownerUserId
+  });
+  await createManualTransaction(db, {
+    accountId: savings.id,
+    transactionDate: "2026-04-06",
+    description: "Groceries",
+    direction: "outgoing",
+    amountMinorUnits: 120000,
+    category: "food",
+    tags: [],
+    ownerUserId
+  });
+
+  await confirmTransfer(db, {
+    outgoingTransactionId: outgoing.id,
+    incomingTransactionId: incoming.id,
+    ownerUserId
+  });
+  const tally = await getConsolidatedMonthTally(db, "2026-04", ownerUserId);
+
+  expect(tally).toMatchObject({
+    totalIncomingMinorUnits: 0,
+    totalOutgoingMinorUnits: 120000,
+    transferNeutralizedPairCount: 1,
+    transferNeutralizedMinorUnits: 5000000
   });
 });
 

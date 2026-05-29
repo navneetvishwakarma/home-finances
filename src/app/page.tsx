@@ -33,6 +33,7 @@ import {
   getMonthCloseStatus,
   isCompleteImportDashboard
 } from "@/modules/imports/persistence";
+import { detectTransferCandidates } from "@/modules/transfers/persistence";
 
 type AccountMetadataSummary = Awaited<ReturnType<typeof getAccountMetadataSummary>>;
 
@@ -72,6 +73,7 @@ export default async function HomePage({ searchParams }: { searchParams: SearchP
   const categoryBreakdown = loadedView.categoryBreakdown;
   const consolidatedTally = loadedView.consolidatedTally;
   const monthCloseStatus = loadedView.monthCloseStatus;
+  const transferCandidates = loadedView.transferCandidates;
   const dashboards = loadedDashboards.filter(isCompleteImportDashboard);
   const accountMetadata = await loadMetadataSummary(currentUser.id).catch(emptyMetadataSummary);
 
@@ -107,6 +109,7 @@ export default async function HomePage({ searchParams }: { searchParams: SearchP
               monthCloseStatus={monthCloseStatus}
               selectedCategory={selectedCategory}
               selectedMonth={selectedMonth}
+              transferCandidates={transferCandidates}
             />
           )}
         </div>
@@ -191,7 +194,8 @@ function TransactionsView({
   dashboards,
   monthCloseStatus,
   selectedCategory,
-  selectedMonth
+  selectedMonth,
+  transferCandidates
 }: {
   activeAccountNames: string[];
   availableMonths: string[];
@@ -201,6 +205,7 @@ function TransactionsView({
   monthCloseStatus: Awaited<ReturnType<typeof getMonthCloseStatus>> | null;
   selectedCategory: string;
   selectedMonth: string;
+  transferCandidates: Awaited<ReturnType<typeof detectTransferCandidates>>;
 }) {
   const isClosed = monthCloseStatus?.status === "closed";
 
@@ -295,6 +300,7 @@ function TransactionsView({
             monthCloseStatus={monthCloseStatus}
             selectedCategory={selectedCategory}
             selectedMonth={selectedMonth}
+            transferCandidates={transferCandidates}
           />
         ) : (
           <div className="empty-state">
@@ -518,6 +524,7 @@ async function loadMonthView(params: Awaited<SearchParams>, ownerUserId: string)
       categoryBreakdown: await getCategoryBreakdown(db, selectedMonth, ownerUserId),
       consolidatedTally: await getConsolidatedMonthTally(db, selectedMonth, ownerUserId),
       monthCloseStatus: await getMonthCloseStatus(db, selectedMonth, ownerUserId),
+      transferCandidates: await detectTransferCandidates(db, selectedMonth, ownerUserId),
       dashboards: await getMonthDashboards(db, selectedMonth, ownerUserId, selectedCategory || undefined)
     };
   }
@@ -529,6 +536,7 @@ async function loadMonthView(params: Awaited<SearchParams>, ownerUserId: string)
     categoryBreakdown: [],
     consolidatedTally: null,
     monthCloseStatus: null,
+    transferCandidates: [],
     dashboards: await loadDashboards(params, ownerUserId)
   };
 }
@@ -546,6 +554,7 @@ function emptyMonthView() {
     categoryBreakdown: [],
     consolidatedTally: null,
     monthCloseStatus: null,
+    transferCandidates: [],
     dashboards: []
   };
 }

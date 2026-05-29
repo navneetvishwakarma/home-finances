@@ -76,7 +76,9 @@ test("renders a consolidated month dashboard with instrument sections", () => {
         totalOutgoingMinorUnits: 195000,
         netMovementMinorUnits: -70000,
         instrumentCount: 2,
-        manualTransactionCount: 1
+        manualTransactionCount: 1,
+        transferNeutralizedPairCount: 1,
+        transferNeutralizedMinorUnits: 50000
       },
       categoryBreakdown: [
         {
@@ -108,6 +110,8 @@ test("renders a consolidated month dashboard with instrument sections", () => {
   expect(html).toContain("ICICI credit card");
   expect(html).toContain("2 instruments");
   expect(html).toContain("includes 1 manual entry");
+  expect(html).toContain("transfers neutralised: 1 pair");
+  expect(html).toContain("INR 500.00");
   expect(html).toContain("Credit card coverage");
   expect(html).toContain("2 billing files");
   expect(html).toContain("Instrument transactions");
@@ -156,6 +160,39 @@ test("hides transaction edit controls when a month is closed", () => {
   expect(html).not.toContain("Add transaction");
   expect(html).not.toContain("Edit transaction");
   expect(html).not.toContain("Delete transaction");
+});
+
+test("renders transfer review candidates and transfer badges", () => {
+  const dashboard = createDashboard("import-1", "icici-bank-april.csv", "icici-bank-csv");
+  dashboard.transactions[1].transferMatchId = "transfer-1";
+  const html = renderToStaticMarkup(
+    createElement(MonthDashboard, {
+      dashboards: [
+        dashboard,
+        createDashboard("import-2", "icici-card-april.csv", "icici-credit-card-csv", { accountId: "account-2" })
+      ],
+      selectedMonth: "2026-04",
+      transferCandidates: [
+        {
+          outgoingTransactionId: "outgoing-1",
+          incomingTransactionId: "incoming-1",
+          outgoingAccountName: "Savings",
+          incomingAccountName: "Credit card",
+          outgoingDate: "2026-04-05",
+          incomingDate: "2026-04-05",
+          amountMinorUnits: 5000000,
+          dayDifference: 0
+        }
+      ]
+    })
+  );
+
+  expect(html).toContain("Review transfers");
+  expect(html).toContain("Savings");
+  expect(html).toContain("Credit card");
+  expect(html).toContain("Confirm as transfer");
+  expect(html).toContain("Dismiss");
+  expect(html).toContain("Transfer");
 });
 
 function createDashboard(

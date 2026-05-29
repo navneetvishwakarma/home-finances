@@ -18,6 +18,10 @@ vi.mock("@/modules/auth/session", () => ({
   }))
 }));
 
+vi.mock("@/modules/transfers/persistence", () => ({
+  detectTransferCandidates: vi.fn(async () => [])
+}));
+
 vi.mock("@/modules/imports/persistence", () => ({
   getImportDashboard: vi.fn(),
   isCompleteImportDashboard: vi.fn((dashboard) => Boolean(dashboard.importBatch && dashboard.tally)),

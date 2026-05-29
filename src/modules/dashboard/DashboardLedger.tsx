@@ -7,9 +7,11 @@ import {
   Trash2
 } from "lucide-react";
 import {
+  confirmTransferAction,
   createManualTransactionAction,
   deleteImportBatchAction,
   deleteTransactionAction,
+  dismissTransferAction,
   updateTransactionDetailsAction
 } from "@/app/actions";
 import { ConfirmSubmitButton } from "@/modules/dashboard/ConfirmSubmitButton";
@@ -34,6 +36,16 @@ type MonthCloseStatus = {
   status: "open" | "closed";
   note?: string | null;
 };
+type TransferCandidate = {
+  outgoingTransactionId: string;
+  incomingTransactionId: string;
+  outgoingAccountName: string;
+  incomingAccountName: string;
+  outgoingDate: string;
+  incomingDate: string;
+  amountMinorUnits: number;
+  dayDifference: number;
+};
 
 export function MonthDashboard({
   categoryBreakdown = [],
@@ -41,7 +53,8 @@ export function MonthDashboard({
   dashboards,
   monthCloseStatus,
   selectedCategory = "",
-  selectedMonth = ""
+  selectedMonth = "",
+  transferCandidates = []
 }: {
   categoryBreakdown?: CategoryBreakdown;
   consolidatedTally?: ConsolidatedMonthTally | null;
@@ -49,6 +62,7 @@ export function MonthDashboard({
   monthCloseStatus?: MonthCloseStatus | null;
   selectedCategory?: string;
   selectedMonth?: string;
+  transferCandidates?: TransferCandidate[];
 }) {
   const completeDashboards = dashboards.filter(isCompleteImportDashboard);
   const isClosed = monthCloseStatus?.status === "closed";
@@ -56,6 +70,7 @@ export function MonthDashboard({
   const displayedTotals =
     consolidatedTally && consolidatedTally.instrumentCount >= 2 ? consolidatedTally : totals;
   const showConsolidatedTally = Boolean(consolidatedTally && consolidatedTally.instrumentCount >= 2);
+  const accountCount = new Set(completeDashboards.map((dashboard) => dashboard.importBatch.accountId)).size;
   const creditCardFileCount = completeDashboards.filter((dashboard) =>
     dashboard.importBatch.sourceProfileId.includes("credit-card")
   ).length;
@@ -102,9 +117,21 @@ export function MonthDashboard({
       {showConsolidatedTally && consolidatedTally?.manualTransactionCount ? (
         <p className="batch-id">includes {consolidatedTally.manualTransactionCount} manual entry</p>
       ) : null}
+      {showConsolidatedTally && consolidatedTally?.transferNeutralizedPairCount ? (
+        <p className="batch-id">
+          transfers neutralised: {consolidatedTally.transferNeutralizedPairCount}{" "}
+          {consolidatedTally.transferNeutralizedPairCount === 1 ? "pair" : "pairs"},{" "}
+          {formatMoney(consolidatedTally.transferNeutralizedMinorUnits)}
+        </p>
+      ) : null}
       <SpendByCategory
         breakdown={categoryBreakdown}
         selectedCategory={selectedCategory}
+        selectedMonth={selectedMonth || consolidatedTally?.month || ""}
+      />
+      <TransferReview
+        accountCount={accountCount}
+        candidates={transferCandidates}
         selectedMonth={selectedMonth || consolidatedTally?.month || ""}
       />
 
@@ -130,6 +157,57 @@ export function MonthDashboard({
         {completeDashboards.map((dashboard) => (
           <article id={`instrument-${dashboard.importBatch.id}`} className="instrument-panel" key={dashboard.importBatch.id}>
             <DashboardLedger data={dashboard} readOnly={isClosed} />
+          </article>
+        ))}
+      </div>
+    </section>
+  );
+}
+
+function TransferReview({
+  accountCount,
+  candidates,
+  selectedMonth
+}: {
+  accountCount: number;
+  candidates: TransferCandidate[];
+  selectedMonth: string;
+}) {
+  if (accountCount < 2 || candidates.length === 0 || !selectedMonth) {
+    return null;
+  }
+
+  return (
+    <section className="transfer-review" aria-labelledby="transfer-review-heading">
+      <div className="section-title-row">
+        <h2 id="transfer-review-heading">Review transfers</h2>
+        <span>{candidates.length} candidates</span>
+      </div>
+      <div className="transfer-candidate-list">
+        {candidates.map((candidate) => (
+          <article className="transfer-candidate" key={`${candidate.outgoingTransactionId}-${candidate.incomingTransactionId}`}>
+            <div>
+              <strong>
+                {candidate.outgoingAccountName} to {candidate.incomingAccountName}
+              </strong>
+              <span>
+                {formatDate(candidate.outgoingDate)} · {formatMoney(candidate.amountMinorUnits)} · {candidate.dayDifference} day difference
+              </span>
+            </div>
+            <div className="transfer-actions">
+              <form action={confirmTransferAction}>
+                <input type="hidden" name="month" value={selectedMonth} />
+                <input type="hidden" name="outgoingTransactionId" value={candidate.outgoingTransactionId} />
+                <input type="hidden" name="incomingTransactionId" value={candidate.incomingTransactionId} />
+                <button type="submit">Confirm as transfer</button>
+              </form>
+              <form action={dismissTransferAction}>
+                <input type="hidden" name="month" value={selectedMonth} />
+                <input type="hidden" name="outgoingTransactionId" value={candidate.outgoingTransactionId} />
+                <input type="hidden" name="incomingTransactionId" value={candidate.incomingTransactionId} />
+                <button type="submit">Dismiss</button>
+              </form>
+            </div>
           </article>
         ))}
       </div>
@@ -349,6 +427,7 @@ export function DashboardLedger({ data, readOnly = false }: { data: DashboardDat
                 {formatMoney(transaction.amountMinorUnits)}
               </span>
               <span className="category-chip">{categoryLabel(transaction.category)}</span>
+              {transferMatchId(transaction) ? <span className="transfer-badge">Transfer</span> : null}
               <ChevronDown aria-hidden="true" className="record-chevron" size={18} />
             </summary>
             <div className="ledger-record-details">
@@ -523,6 +602,10 @@ function formatCategorySource(value: string) {
 
 function formatTags(value: unknown) {
   return Array.isArray(value) ? value.join(", ") : "";
+}
+
+function transferMatchId(transaction: DashboardData["transactions"][number]) {
+  return (transaction as DashboardData["transactions"][number] & { transferMatchId?: string | null }).transferMatchId;
 }
 
 function sourceProfileLabel(sourceProfileId: string) {

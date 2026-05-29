@@ -1,8 +1,8 @@
 import { createHash, randomUUID } from "node:crypto";
-import { and, asc, desc, eq, gte, lt, sql } from "drizzle-orm";
+import { and, asc, desc, eq, gte, inArray, lt, or, sql } from "drizzle-orm";
 import type { AnyColumn } from "drizzle-orm";
 import type { PostgresJsDatabase } from "drizzle-orm/postgres-js";
-import { accounts, importBatches, monthCloses, statementTallies, transactions } from "@/db/schema";
+import { accounts, importBatches, monthCloses, statementTallies, transactions, transferMatches } from "@/db/schema";
 import {
   categoryLabel,
   isTransactionCategory,
@@ -886,12 +886,24 @@ export async function getConsolidatedMonthTally(db: Db, month: string, ownerUser
         accountOwnerCondition(transactions.accountId, ownerUserId)
       )
     );
-  const totalIncomingMinorUnits = ledgerRows
+  const confirmedTransfers = await getConfirmedTransferMatchesForTransactions(
+    db,
+    ledgerRows.map((transaction) => transaction.id)
+  );
+  const confirmedTransferTransactionIds = new Set(
+    confirmedTransfers.flatMap((match) => [match.outgoingTransactionId, match.incomingTransactionId])
+  );
+  const tallyRows = ledgerRows.filter((transaction) => !confirmedTransferTransactionIds.has(transaction.id));
+  const totalIncomingMinorUnits = tallyRows
     .filter((transaction) => transaction.direction === "incoming")
     .reduce((total, transaction) => total + transaction.amountMinorUnits, 0);
-  const totalOutgoingMinorUnits = ledgerRows
+  const totalOutgoingMinorUnits = tallyRows
     .filter((transaction) => transaction.direction === "outgoing")
     .reduce((total, transaction) => total + transaction.amountMinorUnits, 0);
+  const transferNeutralizedMinorUnits = confirmedTransfers.reduce((total, match) => {
+    const outgoing = ledgerRows.find((transaction) => transaction.id === match.outgoingTransactionId);
+    return total + (outgoing?.amountMinorUnits ?? 0);
+  }, 0);
 
   return {
     month,
@@ -899,7 +911,9 @@ export async function getConsolidatedMonthTally(db: Db, month: string, ownerUser
     totalOutgoingMinorUnits,
     netMovementMinorUnits: totalIncomingMinorUnits - totalOutgoingMinorUnits,
     instrumentCount: new Set(ledgerRows.map((transaction) => transaction.accountId)).size,
-    manualTransactionCount: ledgerRows.filter((transaction) => transaction.sourceType === "manual").length
+    manualTransactionCount: ledgerRows.filter((transaction) => transaction.sourceType === "manual").length,
+    transferNeutralizedPairCount: confirmedTransfers.length,
+    transferNeutralizedMinorUnits
   };
 }
 
@@ -1103,16 +1117,29 @@ export async function getMonthDashboards(db: Db, month: string, ownerUserId?: st
         accountOwnerCondition(transactions.accountId, ownerUserId)
       )
     );
+  const confirmedTransfers = await getConfirmedTransferMatchesForTransactions(
+    db,
+    ledgerRows.map((transaction) => transaction.id)
+  );
+  const transferMatchIdsByTransactionId = new Map<string, string>();
+  for (const match of confirmedTransfers) {
+    transferMatchIdsByTransactionId.set(match.outgoingTransactionId, match.id);
+    transferMatchIdsByTransactionId.set(match.incomingTransactionId, match.id);
+  }
+  const ledgerRowsWithTransferMatches = ledgerRows.map((transaction) => ({
+    ...transaction,
+    transferMatchId: transferMatchIdsByTransactionId.get(transaction.id) ?? null
+  }));
   const importBatchIds = Array.from(
     new Set(
-      ledgerRows
+      ledgerRowsWithTransferMatches
         .map((transaction) => transaction.importBatchId)
         .filter((importBatchId): importBatchId is string => Boolean(importBatchId))
     )
   );
 
   if (importBatchIds.length === 0) {
-    return buildManualMonthDashboards(ledgerRows, month);
+    return buildManualMonthDashboards(ledgerRowsWithTransferMatches, month);
   }
 
   const importedDashboards = await Promise.all(
@@ -1124,7 +1151,7 @@ export async function getMonthDashboards(db: Db, month: string, ownerUserId?: st
       if (!importBatch || importBatch.status === "deleted") {
         return null;
       }
-      const batchTransactions = ledgerRows
+      const batchTransactions = ledgerRowsWithTransferMatches
         .filter((transaction) => transaction.importBatchId === importBatchId)
         .sort(
           (left, right) =>
@@ -1142,7 +1169,7 @@ export async function getMonthDashboards(db: Db, month: string, ownerUserId?: st
 
   return [
     ...importedDashboards.filter((dashboard) => dashboard !== null),
-    ...buildManualMonthDashboards(ledgerRows, month)
+    ...buildManualMonthDashboards(ledgerRowsWithTransferMatches, month)
   ];
 }
 
@@ -1407,6 +1434,26 @@ function buildManualMonthDashboards(
 
 function normalizeTags(tags: string[]) {
   return Array.from(new Set(tags.map((tag) => tag.trim()).filter((tag) => tag.length > 0)));
+}
+
+async function getConfirmedTransferMatchesForTransactions(db: Db, transactionIds: string[]) {
+  if (transactionIds.length === 0) {
+    return [];
+  }
+
+  return db
+    .select()
+    .from(transferMatches)
+    .where(
+      and(
+        eq(transferMatches.dismissed, false),
+        sql`${transferMatches.confirmedAt} IS NOT NULL`,
+        or(
+          inArray(transferMatches.outgoingTransactionId, transactionIds),
+          inArray(transferMatches.incomingTransactionId, transactionIds)
+        )
+      )
+    );
 }
 
 function accountOwnerCondition(accountId: AnyColumn, ownerUserId?: string) {
