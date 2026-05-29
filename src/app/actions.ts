@@ -6,6 +6,11 @@ import { requireCurrentUser } from "@/modules/auth/session";
 import { createServerSupabaseClient } from "@/modules/auth/supabase";
 import { runIciciCsvImport } from "@/modules/imports/import-flow";
 import {
+  type ImportFileResult,
+  mapImportErrorMessage,
+  serializeImportResults
+} from "@/modules/imports/import-results";
+import {
   closeMonth,
   createManualTransaction,
   deactivateAccount,
@@ -34,33 +39,62 @@ export async function importIciciStatement(formData: FormData) {
     redirect("/?error=Choose%20at%20least%20one%20supported%20statement%20before%20running%20the%20import");
   }
 
-  const importedMonths = new Set<string>();
-  let importedRowCount = 0;
-  let skippedRowCount = 0;
+  const results: ImportFileResult[] = [];
 
-  try {
-    const db = await getMigratedDatabase();
-    for (const statement of statements) {
+  const db = await getMigratedDatabase();
+  for (const statement of statements) {
+    try {
       const dashboard = await runIciciCsvImport(db, {
         ownerUserId: currentUser.id,
         accountDisplayName,
         filename: statement.name,
         rawCsv: await statement.text()
       });
-      importedRowCount += dashboard.transactions.length;
-      skippedRowCount += dashboard.importBatch?.skippedRowCount ?? 0;
-      for (const transaction of dashboard.transactions) {
-        importedMonths.add(transaction.transactionDate.slice(0, 7));
+      const latestMonth = latestTransactionMonth(dashboard.transactions);
+      if (dashboard.alreadyImported) {
+        results.push({
+          filename: statement.name,
+          status: "skipped",
+          month: latestMonth,
+          rowCount: 0
+        });
+        continue;
       }
+
+      if (!latestMonth) {
+        throw new Error("File contains no transactions.");
+      }
+
+      results.push({
+        filename: statement.name,
+        status: "success",
+        month: latestMonth,
+        rowCount: dashboard.transactions.length
+      });
+    } catch (error) {
+      results.push({
+        filename: statement.name,
+        status: "error",
+        error: mapImportErrorMessage(error)
+      });
     }
-  } catch (error) {
-    const message = error instanceof Error ? error.message : "Import failed";
-    redirect(`/?error=${encodeURIComponent(message)}`);
   }
 
-  const latestImportedMonth = [...importedMonths].sort((left, right) => right.localeCompare(left))[0];
-  const successMessage = importSuccessMessage(importedRowCount, skippedRowCount);
-  redirect(latestImportedMonth ? `/?month=${latestImportedMonth}&success=${successMessage}` : `/?success=${successMessage}`);
+  const resultQuery = `importResults=${serializeImportResults(results)}`;
+  const processedMonths = results
+    .filter((result): result is Extract<ImportFileResult, { status: "success" }> => result.status === "success")
+    .map((result) => result.month);
+  const skippedMonths = results
+    .filter((result): result is Extract<ImportFileResult, { status: "skipped" }> => result.status === "skipped")
+    .map((result) => result.month)
+    .filter((month): month is string => Boolean(month));
+  const latestImportedMonth = [...processedMonths, ...skippedMonths].sort((left, right) => right.localeCompare(left))[0];
+
+  if (latestImportedMonth) {
+    redirect(`/?month=${latestImportedMonth}&success=Import%20processed&${resultQuery}`);
+  }
+
+  redirect(`/?error=All%20files%20failed.%20See%20details.&${resultQuery}`);
 }
 
 export async function loginAction(formData: FormData) {
@@ -389,15 +423,8 @@ function moneyToMinorUnits(value: string) {
   return Number(whole) * 100 + Number(fraction.padEnd(2, "0").slice(0, 2));
 }
 
-function importSuccessMessage(importedRowCount: number, skippedRowCount: number) {
-  if (skippedRowCount === 0) {
-    return "Import%20complete";
-  }
-
-  const importedLabel = importedRowCount === 1 ? "row imported" : "rows imported";
-  const skippedLabel = skippedRowCount === 1 ? "duplicate row skipped" : "duplicate rows skipped";
-
-  return encodeURIComponent(
-    `Import complete: ${importedRowCount} ${importedLabel}, ${skippedRowCount} ${skippedLabel}`
-  );
+function latestTransactionMonth(transactions: Array<{ transactionDate: string }>) {
+  return transactions
+    .map((transaction) => transaction.transactionDate.slice(0, 7))
+    .sort((left, right) => right.localeCompare(left))[0];
 }

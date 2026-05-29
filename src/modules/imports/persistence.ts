@@ -85,7 +85,7 @@ export async function uploadIciciCsvForAccount(
   const fileFingerprint = `sha256:${createHash("sha256").update(input.rawCsv).digest("hex")}`;
 
   try {
-    return await createImportBatch(db, {
+    const importBatch = await createImportBatch(db, {
       accountId: input.accountId,
       sourceProfileId: input.sourceProfileId ?? "icici-bank-csv",
       filename: input.filename,
@@ -93,6 +93,7 @@ export async function uploadIciciCsvForAccount(
       rawSource: input.rawCsv,
       status: "uploaded"
     });
+    return Object.assign(importBatch, { alreadyImported: false });
   } catch (error) {
     if (isDuplicateImportBatch(error)) {
       const [existingImportBatch] = await db
@@ -103,7 +104,7 @@ export async function uploadIciciCsvForAccount(
         );
 
       if (existingImportBatch) {
-        return existingImportBatch;
+        return Object.assign(existingImportBatch, { alreadyImported: true });
       }
     }
 

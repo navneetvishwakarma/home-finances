@@ -1,6 +1,7 @@
 import { createElement } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 import { expect, test, vi } from "vitest";
+import { serializeImportResults } from "@/modules/imports/import-results";
 
 vi.mock("@/db/client", () => ({
   getMigratedDatabase: vi.fn(async () => ({}))
@@ -154,4 +155,39 @@ test("renders metadata view and success toast for authenticated users", async ()
   expect(html).toContain('name="displayName"');
   expect(html).toContain('maxLength="80"');
   expect(html).not.toContain("Month cockpit");
+});
+
+test("renders structured multi-file import results in the toast stack", async () => {
+  const { getCurrentUser } = await import("@/modules/auth/session");
+  vi.mocked(getCurrentUser).mockResolvedValueOnce({
+    id: "user-1",
+    email: "admin@example.com",
+    displayName: "Admin User",
+    role: "admin",
+    active: true,
+    createdAt: new Date(),
+    updatedAt: new Date()
+  });
+  const { default: HomePage } = await import("@/app/page");
+  const page = await HomePage({
+    searchParams: Promise.resolve({
+      success: "Import processed",
+      importResults: serializeImportResults([
+        { filename: "file1.csv", status: "success", month: "2026-04", rowCount: 42 },
+        { filename: "file2.csv", status: "skipped", month: "2026-04", rowCount: 0 },
+        { filename: "file3.csv", status: "error", error: "This file format is not supported." }
+      ])
+    })
+  });
+  const html = renderToStaticMarkup(createElement(() => page));
+
+  expect(html).toContain("Import processed");
+  expect(html).toContain("file1.csv");
+  expect(html).toContain("Imported");
+  expect(html).toContain("April 2026");
+  expect(html).toContain("42 rows");
+  expect(html).toContain("file2.csv");
+  expect(html).toContain("Already imported");
+  expect(html).toContain("file3.csv");
+  expect(html).toContain("This file format is not supported.");
 });

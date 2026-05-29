@@ -17,6 +17,10 @@ import { MonthDashboard } from "@/modules/dashboard/DashboardLedger";
 import { AccountNameInput } from "@/modules/imports/AccountNameInput";
 import { ImportSubmitButton } from "@/modules/imports/ImportSubmitButton";
 import {
+  type ImportFileResult,
+  parseImportResults
+} from "@/modules/imports/import-results";
+import {
   type CompleteImportDashboard,
   getAccountMetadataSummary,
   getAvailableLedgerMonths,
@@ -36,6 +40,7 @@ type SearchParams = Promise<{
   month?: string;
   error?: string;
   success?: string;
+  importResults?: string;
   view?: string;
 }>;
 
@@ -70,7 +75,7 @@ export default async function HomePage({ searchParams }: { searchParams: SearchP
       <div className="app-frame">
         <SideNav currentUser={currentUser} selectedView={selectedView} />
         <div className="app-main">
-          <Toasts error={params.error} success={params.success} />
+          <Toasts error={params.error} importResults={parseImportResults(params.importResults)} success={params.success} />
           <header className="app-header">
             <div>
               <p className="eyebrow">FinState Command Centre</p>
@@ -140,8 +145,16 @@ function SideNav({
   );
 }
 
-function Toasts({ error, success }: { error?: string; success?: string }) {
-  if (!error && !success) {
+function Toasts({
+  error,
+  importResults,
+  success
+}: {
+  error?: string;
+  importResults: ImportFileResult[];
+  success?: string;
+}) {
+  if (!error && !success && importResults.length === 0) {
     return null;
   }
 
@@ -149,6 +162,16 @@ function Toasts({ error, success }: { error?: string; success?: string }) {
     <div className="toast-stack" role="status" aria-live="polite">
       {success ? <p className="toast is-success">{success}</p> : null}
       {error ? <p className="toast is-error">{error}</p> : null}
+      {importResults.length > 0 ? (
+        <ul className="import-result-list" aria-label="Import file results">
+          {importResults.map((result) => (
+            <li className={`import-result-row is-${result.status}`} key={`${result.filename}-${result.status}`}>
+              <strong>{result.filename}</strong>
+              <span>{importResultLabel(result)}</span>
+            </li>
+          ))}
+        </ul>
+      ) : null}
     </div>
   );
 }
@@ -536,4 +559,17 @@ function formatDateTime(value: Date) {
     dateStyle: "medium",
     timeStyle: "short"
   }).format(value);
+}
+
+function importResultLabel(result: ImportFileResult) {
+  if (result.status === "success") {
+    const rowLabel = result.rowCount === 1 ? "row" : "rows";
+    return `Imported (${formatMonthLabel(result.month)}, ${result.rowCount} ${rowLabel})`;
+  }
+
+  if (result.status === "skipped") {
+    return "Already imported";
+  }
+
+  return `Failed: ${result.error}`;
 }

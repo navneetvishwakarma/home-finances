@@ -538,6 +538,45 @@ select {
   background: #fff4ed;
 }
 
+.import-result-list {
+  display: grid;
+  gap: 8px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.import-result-row {
+  display: grid;
+  grid-template-columns: minmax(140px, auto) minmax(0, 1fr);
+  gap: 10px;
+  align-items: center;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  padding: 10px 12px;
+  background: rgba(255, 255, 255, 0.88);
+  color: #323946;
+  font-size: 13px;
+  font-weight: 800;
+}
+
+.import-result-row strong,
+.import-result-row span {
+  overflow-wrap: anywhere;
+}
+
+.import-result-row.is-success {
+  border-color: rgba(5, 150, 105, 0.25);
+}
+
+.import-result-row.is-skipped {
+  border-color: rgba(100, 116, 139, 0.24);
+}
+
+.import-result-row.is-error {
+  border-color: rgba(194, 65, 12, 0.28);
+}
+
 .utility-panel {
   max-width: 860px;
 }
@@ -1300,6 +1339,10 @@ select {
 
   .account-row-actions {
     justify-items: stretch;
+  }
+
+  .import-result-row {
+    grid-template-columns: 1fr;
   }
 
   .month-view-selector {
