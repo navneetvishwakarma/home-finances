@@ -14,10 +14,19 @@ export function parseSourceCsv(rawCsv: string) {
     if (profile) {
       return {
         profileId: profile.id,
+        metadata: sourceMetadata(profile, rawCsv),
         rows: profile.parse(rawCsv, headerIndex)
       };
     }
   }
 
   throw new Error("Unsupported CSV headers. Expected a supported bank or card statement CSV.");
+}
+
+function sourceMetadata(profile: (typeof sourceProfiles)[number], rawCsv: string) {
+  if ("metadata" in profile && typeof profile.metadata === "function") {
+    return profile.metadata(rawCsv);
+  }
+
+  return undefined;
 }

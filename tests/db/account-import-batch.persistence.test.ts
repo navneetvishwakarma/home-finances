@@ -686,4 +686,73 @@ test("includes manual transactions in the selected month view", async () => {
     true
   );
 });
+
+test("scopes dashboard reads and transaction mutations to the authenticated owner", async () => {
+  const userAAccount = await createAccount(db, {
+    displayName: "User A Isolation",
+    providerLabel: "ICICI Bank",
+    currency: "INR",
+    ownerUserId: "user-a"
+  } as any);
+  const userBAccount = await createAccount(db, {
+    displayName: "User B Isolation",
+    providerLabel: "ICICI Bank",
+    currency: "INR",
+    ownerUserId: "user-b"
+  } as any);
+  const userATransaction = await createManualTransaction(db, {
+    accountId: userAAccount.id,
+    transactionDate: "2026-04-10",
+    description: "User A private row",
+    direction: "incoming",
+    amountMinorUnits: 10000,
+    category: "income",
+    tags: []
+  });
+  const userBTransaction = await createManualTransaction(db, {
+    accountId: userBAccount.id,
+    transactionDate: "2026-04-11",
+    description: "User B private row",
+    direction: "incoming",
+    amountMinorUnits: 20000,
+    category: "income",
+    tags: []
+  });
+
+  const userADashboards = await getMonthDashboards(db, "2026-04", "user-a");
+  const userATransactionIds = userADashboards.flatMap((dashboard) =>
+    dashboard.transactions.map((transaction) => transaction.id)
+  );
+
+  expect(userATransactionIds).toContain(userATransaction.id);
+  expect(userATransactionIds).not.toContain(userBTransaction.id);
+  await expect(
+    updateTransactionCategory(db, {
+      transactionId: userBTransaction.id,
+      category: "income",
+      ownerUserId: "user-a"
+    } as any)
+  ).rejects.toThrow("Transaction not found");
+});
+
+test("persists extracted statement metadata on the authenticated owner's account", async () => {
+  const rawCsv = await readFile("assets/sample/2604-icici-savings-statement.csv", "utf8");
+  const dashboard = await runIciciCsvImport(db, {
+    accountDisplayName: "Metadata Extraction Owner",
+    filename: "2604-icici-savings-statement.csv",
+    rawCsv,
+    ownerUserId: "metadata-user"
+  } as any);
+  const [account] = await db
+    .select()
+    .from(accounts)
+    .where(eq(accounts.id, dashboard.importBatch?.accountId ?? ""));
+
+  expect(account).toMatchObject({
+    ownerUserId: "metadata-user",
+    statementHolderName: "NAVNEET KUMAR VISHWAKARMA",
+    institutionName: "ICICI Bank",
+    linkedAccountRef: "XXXXXXX11047"
+  });
+});
 });

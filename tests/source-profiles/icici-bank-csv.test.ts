@@ -8,6 +8,11 @@ test("selects the ICICI CSV profile and returns canonical parsed rows", async ()
   const result = parseSourceCsv(rawCsv);
 
   expect(result.profileId).toBe("icici-bank-csv");
+  expect(result.metadata).toEqual({
+    accountHolderName: "NAVNEET KUMAR VISHWAKARMA",
+    institutionName: "ICICI Bank",
+    linkedAccountRef: "XXXXXXX11047"
+  });
   expect(result.rows[0]).toMatchObject({
     transactionDate: "2026-04-02",
     description: "ACCT CLOSURE TRANSACTION 0354",

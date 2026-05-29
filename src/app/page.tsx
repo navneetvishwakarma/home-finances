@@ -4,6 +4,7 @@ import { getMigratedDatabase } from "@/db/client";
 import { importIciciStatement, loginAction, logoutAction, signupAction } from "@/app/actions";
 import { getCurrentUser } from "@/modules/auth/session";
 import { MonthDashboard } from "@/modules/dashboard/DashboardLedger";
+import { ImportSubmitButton } from "@/modules/imports/ImportSubmitButton";
 import {
   type CompleteImportDashboard,
   getAccountMetadataSummary,
@@ -34,7 +35,7 @@ export default async function HomePage({ searchParams }: { searchParams: SearchP
   const selectedView = selectedAppView(params.view);
   const loadedView =
     selectedView === "transactions"
-      ? await loadMonthView(params).catch((error) => {
+      ? await loadMonthView(params, currentUser.id).catch((error) => {
           if (error instanceof Error && error.message.includes("DATABASE_URL")) {
             return emptyMonthView();
           }
@@ -45,7 +46,8 @@ export default async function HomePage({ searchParams }: { searchParams: SearchP
   const { availableMonths, selectedMonth } = loadedView;
   const loadedDashboards = loadedView.dashboards;
   const dashboards = loadedDashboards.filter(isCompleteImportDashboard);
-  const metadataSummary = selectedView === "metadata" ? await loadMetadataSummary().catch(emptyMetadataSummary) : null;
+  const metadataSummary =
+    selectedView === "metadata" ? await loadMetadataSummary(currentUser.id).catch(emptyMetadataSummary) : null;
 
   return (
     <main className="app-shell">
@@ -169,9 +171,7 @@ function TransactionsView({
             <span>Statement files</span>
             <input name="statements" type="file" accept=".csv,text/csv,.txt,text/plain" multiple required />
           </label>
-          <button className="primary-action" type="submit">
-            Run import
-          </button>
+          <ImportSubmitButton />
         </form>
 
         <section className="coverage-card" aria-labelledby="coverage-heading">
@@ -326,7 +326,7 @@ function LoginPage({ error, success }: { error?: string; success?: string }) {
   );
 }
 
-async function loadDashboards(params: Awaited<SearchParams>) {
+async function loadDashboards(params: Awaited<SearchParams>, ownerUserId: string) {
   const importBatchIds = params.importBatchIds
     ? params.importBatchIds.split(",").filter(Boolean)
     : params.importBatchId
@@ -335,20 +335,20 @@ async function loadDashboards(params: Awaited<SearchParams>) {
 
   if (importBatchIds.length === 0) {
     const db = await getMigratedDatabase();
-    return getLatestImportDashboards(db);
+    return getLatestImportDashboards(db, 12, ownerUserId);
   }
 
   const db = await getMigratedDatabase();
   const dashboards = await Promise.all(
-    importBatchIds.map((importBatchId) => getImportDashboard(db, importBatchId))
+    importBatchIds.map((importBatchId) => getImportDashboard(db, importBatchId, ownerUserId))
   );
 
   return dashboards.filter(isCompleteImportDashboard);
 }
 
-async function loadMonthView(params: Awaited<SearchParams>) {
+async function loadMonthView(params: Awaited<SearchParams>, ownerUserId: string) {
   const db = await getMigratedDatabase();
-  const availableMonths = await getAvailableLedgerMonths(db);
+  const availableMonths = await getAvailableLedgerMonths(db, ownerUserId);
   const selectedMonth =
     params.month && availableMonths.includes(params.month) ? params.month : availableMonths[0] ?? "";
 
@@ -356,20 +356,20 @@ async function loadMonthView(params: Awaited<SearchParams>) {
     return {
       availableMonths,
       selectedMonth,
-      dashboards: await getMonthDashboards(db, selectedMonth)
+      dashboards: await getMonthDashboards(db, selectedMonth, ownerUserId)
     };
   }
 
   return {
     availableMonths,
     selectedMonth,
-    dashboards: await loadDashboards(params)
+    dashboards: await loadDashboards(params, ownerUserId)
   };
 }
 
-async function loadMetadataSummary() {
+async function loadMetadataSummary(ownerUserId: string) {
   const db = await getMigratedDatabase();
-  return getAccountMetadataSummary(db);
+  return getAccountMetadataSummary(db, ownerUserId);
 }
 
 function emptyMonthView() {
