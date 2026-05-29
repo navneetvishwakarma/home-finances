@@ -116,6 +116,12 @@ select {
   line-height: 1.05;
 }
 
+.auth-panel h2 {
+  margin: 0;
+  font-size: 18px;
+  line-height: 1.2;
+}
+
 .auth-panel p {
   margin: 0 0 22px;
   color: var(--muted);
@@ -124,6 +130,12 @@ select {
 .auth-panel form {
   display: grid;
   gap: 16px;
+}
+
+.auth-divider {
+  height: 1px;
+  margin: 22px 0;
+  background: var(--line);
 }
 
 .app-header h1 {
@@ -320,6 +332,22 @@ select {
   box-shadow: 0 16px 34px rgba(37, 99, 235, 0.24);
 }
 
+.secondary-action {
+  width: 100%;
+  border: 1px solid rgba(37, 99, 235, 0.34);
+  border-radius: var(--radius-control);
+  padding: 12px 14px;
+  color: var(--blue);
+  background: #ffffff;
+  font-weight: 800;
+  cursor: pointer;
+}
+
+.secondary-action:hover {
+  border-color: var(--blue);
+  background: #eff6ff;
+}
+
 .support-card,
 .coverage-card {
   margin-top: 18px;
@@ -365,6 +393,16 @@ select {
   padding: 12px;
   color: var(--coral);
   background: #fff4ed;
+  line-height: 1.4;
+}
+
+.success-banner {
+  margin: 0 0 18px;
+  border: 1px solid rgba(5, 150, 105, 0.25);
+  border-radius: 6px;
+  padding: 12px;
+  color: #047857;
+  background: var(--green-soft);
   line-height: 1.4;
 }
 

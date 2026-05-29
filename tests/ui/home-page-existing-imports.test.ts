@@ -13,7 +13,6 @@ vi.mock("@/modules/auth/session", () => ({
     displayName: "Admin User",
     role: "admin",
     active: true,
-    passwordHash: "hash",
     createdAt: new Date(),
     updatedAt: new Date()
   }))

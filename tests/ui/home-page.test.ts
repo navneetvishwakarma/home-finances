@@ -24,6 +24,8 @@ test("renders the login entry point when no user is authenticated", async () => 
   const html = renderToStaticMarkup(createElement(() => page));
 
   expect(html).toContain("Sign in to FinState");
+  expect(html).toContain("Create account");
+  expect(html).toContain('name="displayName"');
   expect(html).toContain('name="email"');
   expect(html).toContain('name="password"');
   expect(html).not.toContain("Month-close intake");
@@ -37,7 +39,6 @@ test("renders the MVP 1 upload entry point for authenticated users", async () =>
     displayName: "Admin User",
     role: "admin",
     active: true,
-    passwordHash: "hash",
     createdAt: new Date(),
     updatedAt: new Date()
   });

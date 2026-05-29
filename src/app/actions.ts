@@ -2,17 +2,8 @@
 
 import { redirect } from "next/navigation";
 import { getMigratedDatabase } from "@/db/client";
-import {
-  clearCurrentSession,
-  requireCurrentUser,
-  setSessionCookie
-} from "@/modules/auth/session";
-import {
-  createSession,
-  ensureBootstrapAdmin,
-  findUserByEmail,
-  verifyPassword
-} from "@/modules/auth/persistence";
+import { requireCurrentUser } from "@/modules/auth/session";
+import { createServerSupabaseClient } from "@/modules/auth/supabase";
 import { runIciciCsvImport } from "@/modules/imports/import-flow";
 import {
   createManualTransaction,
@@ -62,20 +53,16 @@ export async function importIciciStatement(formData: FormData) {
 }
 
 export async function loginAction(formData: FormData) {
-  const email = String(formData.get("email") || "");
+  const email = String(formData.get("email") || "").trim().toLowerCase();
   const password = String(formData.get("password") || "");
 
   try {
-    const db = await getMigratedDatabase();
-    await ensureBootstrapAdmin(db);
-    const user = await findUserByEmail(db, email);
+    const supabase = await createServerSupabaseClient();
+    const { error } = await supabase.auth.signInWithPassword({ email, password });
 
-    if (!user || !user.active || !(await verifyPassword(password, user.passwordHash))) {
-      throw new Error("Invalid email or password");
+    if (error) {
+      throw new Error(error.message || "Invalid email or password");
     }
-
-    const session = await createSession(db, { userId: user.id });
-    await setSessionCookie(session.token);
   } catch (error) {
     const message = error instanceof Error ? error.message : "Login failed";
     redirect(`/?error=${encodeURIComponent(message)}`);
@@ -84,8 +71,41 @@ export async function loginAction(formData: FormData) {
   redirect("/");
 }
 
+export async function signupAction(formData: FormData) {
+  const displayName = String(formData.get("displayName") || "").trim();
+  const email = String(formData.get("email") || "").trim().toLowerCase();
+  const password = String(formData.get("password") || "");
+
+  try {
+    if (!displayName) {
+      throw new Error("Display name is required");
+    }
+
+    const supabase = await createServerSupabaseClient();
+    const { error } = await supabase.auth.signUp({
+      email,
+      password,
+      options: {
+        data: {
+          display_name: displayName
+        }
+      }
+    });
+
+    if (error) {
+      throw new Error(error.message || "Account creation failed");
+    }
+  } catch (error) {
+    const message = error instanceof Error ? error.message : "Account creation failed";
+    redirect(`/?error=${encodeURIComponent(message)}`);
+  }
+
+  redirect("/?success=Account%20created.%20Check%20your%20email%20if%20confirmation%20is%20enabled.");
+}
+
 export async function logoutAction() {
-  await clearCurrentSession();
+  const supabase = await createServerSupabaseClient();
+  await supabase.auth.signOut();
   redirect("/");
 }
 

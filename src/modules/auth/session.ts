@@ -1,25 +1,27 @@
 import { cookies } from "next/headers";
-import { getMigratedDatabase } from "@/db/client";
-import {
-  deleteSession,
-  ensureBootstrapAdmin,
-  getUserBySessionToken
-} from "@/modules/auth/persistence";
-
-export const sessionCookieName = "finstate_session";
+import { createServerSupabaseClient } from "@/modules/auth/supabase";
 
 export async function getCurrentUser() {
-  const cookieStore = await cookies();
-  const token = cookieStore.get(sessionCookieName)?.value;
-
-  if (!token) {
+  if (!(await hasSupabaseAuthCookie())) {
     return null;
   }
 
-  const db = await getMigratedDatabase();
-  await ensureBootstrapAdmin(db);
+  const supabase = await createServerSupabaseClient();
+  const { data, error } = await supabase.auth.getUser();
 
-  return getUserBySessionToken(db, token);
+  if (error || !data.user?.email) {
+    return null;
+  }
+
+  return {
+    id: data.user.id,
+    email: data.user.email,
+    displayName: displayNameForUser(data.user),
+    role: String(data.user.app_metadata?.role ?? "user"),
+    active: true,
+    createdAt: new Date(data.user.created_at),
+    updatedAt: new Date(data.user.updated_at ?? data.user.created_at)
+  };
 }
 
 export async function requireCurrentUser() {
@@ -32,25 +34,23 @@ export async function requireCurrentUser() {
   return user;
 }
 
-export async function setSessionCookie(token: string) {
-  const cookieStore = await cookies();
-  cookieStore.set(sessionCookieName, token, {
-    httpOnly: true,
-    sameSite: "lax",
-    secure: process.env.NODE_ENV === "production",
-    path: "/",
-    maxAge: 60 * 60 * 24 * 14
-  });
-}
+function displayNameForUser(user: {
+  email?: string;
+  user_metadata?: Record<string, unknown>;
+}) {
+  const metadataName = user.user_metadata?.display_name;
 
-export async function clearCurrentSession() {
-  const cookieStore = await cookies();
-  const token = cookieStore.get(sessionCookieName)?.value;
-
-  if (token) {
-    const db = await getMigratedDatabase();
-    await deleteSession(db, token);
+  if (typeof metadataName === "string" && metadataName.trim()) {
+    return metadataName.trim();
   }
 
-  cookieStore.delete(sessionCookieName);
+  return user.email?.split("@")[0] ?? "User";
+}
+
+async function hasSupabaseAuthCookie() {
+  const cookieStore = await cookies();
+
+  return cookieStore.getAll().some((cookie) => {
+    return cookie.name.startsWith("sb-") || cookie.name.includes("supabase");
+  });
 }
