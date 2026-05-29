@@ -14,6 +14,10 @@ import {
   getImportDashboard,
   persistParsedTransactions,
   updateTransactionCategory,
+  updateTransactionDetails,
+  createManualTransaction,
+  deleteTransaction,
+  deleteImportBatch,
   uploadIciciCsvForAccount
 } from "@/modules/imports/persistence";
 import { DashboardLedger } from "@/modules/dashboard/DashboardLedger";
@@ -70,7 +74,7 @@ test("persists a bank account and an import batch through the database schema", 
   });
 });
 
-test("rejects uploading the same ICICI CSV twice for one account", async () => {
+test("reuses the existing import batch when the same ICICI CSV is uploaded twice for one account", async () => {
   const rawCsv = await readFile("assets/sample/2604-icici-savings-statement.csv", "utf8");
   const account = await createAccount(db, {
     displayName: "ICICI Savings Duplicate Test",
@@ -84,19 +88,23 @@ test("rejects uploading the same ICICI CSV twice for one account", async () => {
     rawCsv
   });
 
-  await expect(
-    uploadIciciCsvForAccount(db, {
+  const duplicateUpload = await uploadIciciCsvForAccount(db, {
       accountId: account.id,
       filename: "2604-icici-savings-statement.csv",
       rawCsv
-    })
-  ).rejects.toThrow("CSV file already uploaded for this account");
+    });
 
   const [persistedBatch] = await db
     .select()
     .from(importBatches)
     .where(eq(importBatches.id, firstUpload.id));
+  const accountImportBatches = await db
+    .select()
+    .from(importBatches)
+    .where(eq(importBatches.accountId, account.id));
 
+  expect(duplicateUpload.id).toBe(firstUpload.id);
+  expect(accountImportBatches).toHaveLength(1);
   expect(persistedBatch).toMatchObject({
     accountId: account.id,
     sourceProfileId: "icici-bank-csv",
@@ -214,6 +222,156 @@ test("updates a transaction category manually and marks the source as manual", a
     category: "food",
     categorySource: "manual"
   });
+});
+
+test("edits imported transaction display fields without mutating source identity", async () => {
+  const account = await createAccount(db, {
+    displayName: "Imported Transaction Edit Test",
+    providerLabel: "ICICI Bank",
+    currency: "INR"
+  });
+  const importBatch = await createImportBatch(db, {
+    accountId: account.id,
+    sourceProfileId: "icici-bank-csv",
+    filename: "editable-import.csv",
+    fileFingerprint: "sha256:editable-import",
+    rawSource: "csv-content",
+    status: "uploaded"
+  });
+  const [transaction] = await persistParsedTransactions(db, {
+    accountId: account.id,
+    importBatchId: importBatch.id,
+    rows: [
+      {
+        valueDate: "2026-04-01",
+        transactionDate: "2026-04-01",
+        description: "UPI GROCERY STORE",
+        withdrawalAmount: "1200.00",
+        depositAmount: "0.00",
+        balance: "10000.00",
+        rawRow: {
+          "S No.": "1",
+          "Transaction Remarks": "UPI GROCERY STORE",
+          "Withdrawal Amount(INR)": "1200.00",
+          "Deposit Amount(INR)": "0.00"
+        }
+      }
+    ]
+  });
+
+  const updated = await updateTransactionDetails(db, {
+    transactionId: transaction.id,
+    description: "Groceries at local store",
+    category: "food",
+    tags: ["household", "weekly"]
+  });
+
+  expect(updated).toMatchObject({
+    id: transaction.id,
+    description: "Groceries at local store",
+    originalDescription: "UPI GROCERY STORE",
+    category: "food",
+    categorySource: "manual",
+    sourceType: "imported",
+    importBatchId: importBatch.id,
+    rowHash: transaction.rowHash,
+    sourceRowId: transaction.sourceRowId,
+    tags: ["household", "weekly"]
+  });
+});
+
+test("restores a manually deleted imported transaction when the same source is re-imported", async () => {
+  const rawCsv = await readFile("assets/sample/2604-icici-savings-statement.csv", "utf8");
+  const account = await createAccount(db, {
+    displayName: "Imported Transaction Restore Test",
+    providerLabel: "ICICI Bank",
+    currency: "INR"
+  });
+  const importBatch = await uploadIciciCsvForAccount(db, {
+    accountId: account.id,
+    filename: "2604-icici-savings-statement.csv",
+    rawCsv
+  });
+  const [firstParsedRow] = parseSourceCsv(rawCsv).rows;
+  const [transaction] = await persistParsedTransactions(db, {
+    accountId: account.id,
+    importBatchId: importBatch.id,
+    rows: [firstParsedRow]
+  });
+
+  await deleteTransaction(db, { transactionId: transaction.id });
+  expect((await getImportDashboard(db, importBatch.id)).transactions).toHaveLength(0);
+
+  const duplicateImportBatch = await uploadIciciCsvForAccount(db, {
+    accountId: account.id,
+    filename: "2604-icici-savings-statement.csv",
+    rawCsv
+  });
+  await persistParsedTransactions(db, {
+    accountId: account.id,
+    importBatchId: duplicateImportBatch.id,
+    rows: [firstParsedRow]
+  });
+
+  const restoredDashboard = await getImportDashboard(db, importBatch.id);
+  expect(duplicateImportBatch.id).toBe(importBatch.id);
+  expect(restoredDashboard.transactions).toHaveLength(1);
+  expect(restoredDashboard.transactions[0]).toMatchObject({
+    id: transaction.id,
+    deletedAt: null,
+    sourceType: "imported"
+  });
+});
+
+test("manual transactions can be added and deleted without source-row restore behavior", async () => {
+  const account = await createAccount(db, {
+    displayName: "Manual Transaction Test",
+    providerLabel: "Manual",
+    currency: "INR"
+  });
+
+  const manualTransaction = await createManualTransaction(db, {
+    accountId: account.id,
+    transactionDate: "2026-04-10",
+    description: "Cash groceries",
+    direction: "outgoing",
+    amountMinorUnits: 180000,
+    category: "food",
+    tags: ["cash"]
+  });
+
+  expect(manualTransaction).toMatchObject({
+    accountId: account.id,
+    importBatchId: null,
+    sourceType: "manual",
+    sourceRowId: null,
+    originalDescription: null,
+    description: "Cash groceries",
+    tags: ["cash"]
+  });
+
+  await deleteTransaction(db, { transactionId: manualTransaction.id });
+
+  const [deletedManualTransaction] = await db
+    .select()
+    .from(transactions)
+    .where(eq(transactions.id, manualTransaction.id));
+  expect(deletedManualTransaction.deletedAt).toBeInstanceOf(Date);
+});
+
+test("deleting an import hides its source-derived transactions from active dashboards", async () => {
+  const rawCsv = await readFile("assets/sample/2604-icici-savings-statement.csv", "utf8");
+  const dashboard = await runIciciCsvImport(db, {
+    accountDisplayName: "Import Delete Test",
+    filename: "2604-icici-savings-statement.csv",
+    rawCsv
+  });
+
+  await deleteImportBatch(db, { importBatchId: dashboard.importBatch.id });
+
+  const deletedDashboard = await getImportDashboard(db, dashboard.importBatch.id);
+  expect(deletedDashboard.importBatch.status).toBe("deleted");
+  expect(deletedDashboard.transactions).toHaveLength(0);
 });
 
 test("computes and persists a statement tally for an imported ledger", async () => {
@@ -362,5 +520,28 @@ test("runs the full ICICI import flow and returns dashboard data for the UI", as
     direction: "incoming",
     amountMinorUnits: 14920000
   });
+});
+
+test("runs the full import flow idempotently when the same statement is re-imported", async () => {
+  const rawCsv = await readFile("assets/sample/2604-icici-savings-statement.csv", "utf8");
+
+  const firstDashboard = await runIciciCsvImport(db, {
+    accountDisplayName: "ICICI Savings Full Idempotency Test",
+    filename: "2604-icici-savings-statement.csv",
+    rawCsv
+  });
+  const secondDashboard = await runIciciCsvImport(db, {
+    accountDisplayName: "ICICI Savings Full Idempotency Test",
+    filename: "2604-icici-savings-statement.csv",
+    rawCsv
+  });
+  const accountTransactions = await db
+    .select()
+    .from(transactions)
+    .where(eq(transactions.accountId, firstDashboard.importBatch.accountId));
+
+  expect(secondDashboard.importBatch.id).toBe(firstDashboard.importBatch.id);
+  expect(secondDashboard.transactions).toHaveLength(firstDashboard.transactions.length);
+  expect(accountTransactions).toHaveLength(firstDashboard.transactions.length);
 });
 });

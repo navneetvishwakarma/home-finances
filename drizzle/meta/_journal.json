@@ -43,6 +43,13 @@
       "when": 1760000005000,
       "tag": "0005_statement_specific_classification_backfill",
       "breakpoints": false
+    },
+    {
+      "idx": 6,
+      "version": "7",
+      "when": 1760000006000,
+      "tag": "0006_transaction_management",
+      "breakpoints": true
     }
   ]
 }

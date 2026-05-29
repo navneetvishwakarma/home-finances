@@ -51,10 +51,12 @@ export const transactions = pgTable(
       .notNull()
       .references(() => accounts.id),
     importBatchId: uuid("import_batch_id")
-      .notNull()
       .references(() => importBatches.id),
+    sourceType: text("source_type").notNull().default("imported"),
+    sourceRowId: text("source_row_id"),
     transactionDate: date("transaction_date").notNull(),
     description: text("description").notNull(),
+    originalDescription: text("original_description"),
     direction: text("direction").notNull(),
     amountMinorUnits: bigint("amount_minor_units", { mode: "number" }).notNull(),
     runningBalanceMinorUnits: bigint("running_balance_minor_units", { mode: "number" }).notNull(),
@@ -62,6 +64,8 @@ export const transactions = pgTable(
     categorySource: text("category_source").notNull().default("uncategorized"),
     rowHash: text("row_hash").notNull(),
     rawSourcePayload: jsonb("raw_source_payload").notNull(),
+    tags: jsonb("tags").notNull().default([]),
+    deletedAt: timestamp("deleted_at", { withTimezone: true }),
     createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow()
   },
   (table) => ({
