@@ -21,14 +21,25 @@ import {
 import {
   isCompleteImportDashboard,
   type CompleteImportDashboard,
+  type getConsolidatedMonthTally,
   type getImportDashboard
 } from "@/modules/imports/persistence";
 
 type DashboardData = Awaited<ReturnType<typeof getImportDashboard>>;
+type ConsolidatedMonthTally = Awaited<ReturnType<typeof getConsolidatedMonthTally>>;
 
-export function MonthDashboard({ dashboards }: { dashboards: DashboardData[] }) {
+export function MonthDashboard({
+  consolidatedTally,
+  dashboards
+}: {
+  consolidatedTally?: ConsolidatedMonthTally | null;
+  dashboards: DashboardData[];
+}) {
   const completeDashboards = dashboards.filter(isCompleteImportDashboard);
   const totals = summarizeMonth(completeDashboards);
+  const displayedTotals =
+    consolidatedTally && consolidatedTally.instrumentCount >= 2 ? consolidatedTally : totals;
+  const showConsolidatedTally = Boolean(consolidatedTally && consolidatedTally.instrumentCount >= 2);
   const creditCardFileCount = completeDashboards.filter((dashboard) =>
     dashboard.importBatch.sourceProfileId.includes("credit-card")
   ).length;
@@ -38,8 +49,12 @@ export function MonthDashboard({ dashboards }: { dashboards: DashboardData[] }) 
       <header className="month-dashboard-header">
         <div>
           <p className="section-kicker">Complete month view</p>
-          <h2>Consolidation summary</h2>
-          <p>{completeDashboards.length} files uploaded across all detected instruments.</p>
+          <h2>{showConsolidatedTally ? "Month summary" : "Instrument summary"}</h2>
+          <p>
+            {showConsolidatedTally
+              ? `${consolidatedTally?.instrumentCount ?? 0} instruments`
+              : "single statement total"}
+          </p>
         </div>
         <span className="status-chip is-balanced">
           {creditCardFileCount >= 2 ? `${creditCardFileCount} billing files` : "Card coverage pending"}
@@ -49,21 +64,24 @@ export function MonthDashboard({ dashboards }: { dashboards: DashboardData[] }) 
       <dl className="consolidation-grid">
         <div className="metric-card is-incoming">
           <dt>Total incoming</dt>
-          <dd>{formatMoney(totals.totalIncomingMinorUnits)}</dd>
+          <dd>{formatMoney(displayedTotals.totalIncomingMinorUnits)}</dd>
         </div>
         <div className="metric-card is-outgoing">
           <dt>Total outgoing</dt>
-          <dd>{formatMoney(totals.totalOutgoingMinorUnits)}</dd>
+          <dd>{formatMoney(displayedTotals.totalOutgoingMinorUnits)}</dd>
         </div>
         <div className="metric-card">
           <dt>Net month movement</dt>
-          <dd>{formatMoney(totals.netMovementMinorUnits)}</dd>
+          <dd>{formatMoney(displayedTotals.netMovementMinorUnits)}</dd>
         </div>
         <div className="metric-card">
           <dt>Credit card coverage</dt>
           <dd>{creditCardFileCount} billing files</dd>
         </div>
       </dl>
+      {showConsolidatedTally && consolidatedTally?.manualTransactionCount ? (
+        <p className="batch-id">includes {consolidatedTally.manualTransactionCount} manual entry</p>
+      ) : null}
 
       <nav className="instrument-tabs" aria-label="Instrument views">
         <a href="#all-instruments" className="is-active">

@@ -22,6 +22,14 @@ vi.mock("@/modules/imports/persistence", () => ({
   getImportDashboard: vi.fn(),
   isCompleteImportDashboard: vi.fn((dashboard) => Boolean(dashboard.importBatch && dashboard.tally)),
   getAvailableLedgerMonths: vi.fn(async () => ["2026-04", "2026-03"]),
+  getConsolidatedMonthTally: vi.fn(async () => ({
+    month: "2026-04",
+    totalIncomingMinorUnits: 100000,
+    totalOutgoingMinorUnits: 35000,
+    netMovementMinorUnits: 65000,
+    instrumentCount: 1,
+    manualTransactionCount: 0
+  })),
   getMonthDashboards: vi.fn(async () => [
     {
       importBatch: {
@@ -132,7 +140,7 @@ test("renders existing imported transactions when no import batch query is provi
   const page = await HomePage({ searchParams: Promise.resolve({}) });
   const html = renderToStaticMarkup(createElement(() => page));
 
-  expect(html).toContain("Consolidation summary");
+  expect(html).toContain("Instrument summary");
   expect(html).toContain("Month view");
   expect(html).toContain("April 2026");
   expect(html).toContain("March 2026");
