@@ -53,6 +53,7 @@ export const transactions = pgTable(
     direction: text("direction").notNull(),
     amountMinorUnits: bigint("amount_minor_units", { mode: "number" }).notNull(),
     runningBalanceMinorUnits: bigint("running_balance_minor_units", { mode: "number" }).notNull(),
+    balanceEstimated: boolean("balance_estimated").notNull().default(false),
     category: text("category").notNull().default("uncategorized"),
     categorySource: text("category_source").notNull().default("uncategorized"),
     sourceFingerprint: text("source_fingerprint").notNull(),

@@ -16,6 +16,7 @@ import {
   updateTransactionCategory,
   updateTransactionDetails,
   createManualTransaction,
+  backfillManualTransactionRunningBalances,
   deleteTransaction,
   deleteImportBatch,
   getAvailableLedgerMonths,
@@ -359,6 +360,173 @@ test("manual transactions can be added and deleted without source-row restore be
     .from(transactions)
     .where(eq(transactions.id, manualTransaction.id));
   expect(deletedManualTransaction.deletedAt).toBeInstanceOf(Date);
+});
+
+test("stores a supplied running balance for a manual transaction", async () => {
+  const account = await createAccount(db, {
+    displayName: "Manual Supplied Balance Test",
+    providerLabel: "Manual",
+    currency: "INR"
+  });
+
+  const manualTransaction = await createManualTransaction(db, {
+    accountId: account.id,
+    transactionDate: "2026-04-10",
+    description: "Cash rent",
+    direction: "outgoing",
+    amountMinorUnits: 2500000,
+    runningBalanceMinorUnits: 7250000,
+    category: "rent_home",
+    tags: []
+  });
+
+  expect(manualTransaction).toMatchObject({
+    runningBalanceMinorUnits: 7250000,
+    balanceEstimated: false
+  });
+});
+
+test("computes a manual transaction running balance from the closest prior non-zero balance", async () => {
+  const account = await createAccount(db, {
+    displayName: "Manual Computed Balance Test",
+    providerLabel: "ICICI Bank",
+    currency: "INR"
+  });
+  const importBatch = await createImportBatch(db, {
+    accountId: account.id,
+    sourceProfileId: "icici-bank-csv",
+    filename: "prior-balance.csv",
+    fileFingerprint: "sha256:prior-balance",
+    rawSource: "csv-content",
+    status: "uploaded"
+  });
+  await persistParsedTransactions(db, {
+    accountId: account.id,
+    importBatchId: importBatch.id,
+    rows: [
+      {
+        valueDate: "2026-04-08",
+        transactionDate: "2026-04-08",
+        description: "OLDER BALANCE",
+        withdrawalAmount: "0.00",
+        depositAmount: "100.00",
+        balance: "50000.00",
+        rawRow: { "S No.": "1", "Transaction Remarks": "OLDER BALANCE" }
+      },
+      {
+        valueDate: "2026-04-09",
+        transactionDate: "2026-04-09",
+        description: "CLOSEST PRIOR BALANCE",
+        withdrawalAmount: "0.00",
+        depositAmount: "200.00",
+        balance: "60000.00",
+        rawRow: { "S No.": "2", "Transaction Remarks": "CLOSEST PRIOR BALANCE" }
+      }
+    ]
+  });
+
+  const manualTransaction = await createManualTransaction(db, {
+    accountId: account.id,
+    transactionDate: "2026-04-10",
+    description: "Cash groceries",
+    direction: "outgoing",
+    amountMinorUnits: 180000,
+    category: "food",
+    tags: []
+  });
+
+  expect(manualTransaction).toMatchObject({
+    runningBalanceMinorUnits: 5820000,
+    balanceEstimated: true
+  });
+});
+
+test("stores zero and marks balance estimated when a manual transaction has no prior balance", async () => {
+  const account = await createAccount(db, {
+    displayName: "Manual No Prior Balance Test",
+    providerLabel: "Manual",
+    currency: "INR"
+  });
+
+  const manualTransaction = await createManualTransaction(db, {
+    accountId: account.id,
+    transactionDate: "2026-04-10",
+    description: "Opening cash expense",
+    direction: "outgoing",
+    amountMinorUnits: 180000,
+    category: "food",
+    tags: []
+  });
+
+  expect(manualTransaction).toMatchObject({
+    runningBalanceMinorUnits: 0,
+    balanceEstimated: true
+  });
+});
+
+test("backfills existing manual transaction running balances idempotently", async () => {
+  const account = await createAccount(db, {
+    displayName: "Manual Balance Backfill Test",
+    providerLabel: "ICICI Bank",
+    currency: "INR"
+  });
+  const importBatch = await createImportBatch(db, {
+    accountId: account.id,
+    sourceProfileId: "icici-bank-csv",
+    filename: "backfill-prior-balance.csv",
+    fileFingerprint: "sha256:backfill-prior-balance",
+    rawSource: "csv-content",
+    status: "uploaded"
+  });
+  await persistParsedTransactions(db, {
+    accountId: account.id,
+    importBatchId: importBatch.id,
+    rows: [
+      {
+        valueDate: "2026-04-09",
+        transactionDate: "2026-04-09",
+        description: "PRIOR BALANCE",
+        withdrawalAmount: "0.00",
+        depositAmount: "100.00",
+        balance: "60000.00",
+        rawRow: { "S No.": "1", "Transaction Remarks": "PRIOR BALANCE" }
+      }
+    ]
+  });
+  await db.insert(transactions).values({
+    id: "11111111-1111-4111-8111-111111111111",
+    accountId: account.id,
+    importBatchId: null,
+    sourceType: "manual",
+    sourceRowId: null,
+    transactionDate: "2026-04-10",
+    description: "Historical cash groceries",
+    originalDescription: null,
+    direction: "outgoing",
+    amountMinorUnits: 180000,
+    runningBalanceMinorUnits: 0,
+    balanceEstimated: false,
+    category: "food",
+    categorySource: "manual",
+    sourceFingerprint: "manual:backfill-balance",
+    rowHash: "manual:backfill-balance",
+    rawSourcePayload: { source: "manual" },
+    tags: []
+  });
+
+  const firstBackfill = await backfillManualTransactionRunningBalances(db);
+  const secondBackfill = await backfillManualTransactionRunningBalances(db);
+  const [backfilledTransaction] = await db
+    .select()
+    .from(transactions)
+    .where(eq(transactions.sourceFingerprint, "manual:backfill-balance"));
+
+  expect(firstBackfill.updatedCount).toBe(1);
+  expect(secondBackfill.updatedCount).toBe(0);
+  expect(backfilledTransaction).toMatchObject({
+    runningBalanceMinorUnits: 5820000,
+    balanceEstimated: true
+  });
 });
 
 test("deleting an import hides its source-derived transactions from active dashboards", async () => {

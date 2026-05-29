@@ -1,5 +1,5 @@
 import { createHash, randomUUID } from "node:crypto";
-import { and, desc, eq, gte, lt, sql } from "drizzle-orm";
+import { and, asc, desc, eq, gte, lt, sql } from "drizzle-orm";
 import type { AnyColumn } from "drizzle-orm";
 import type { PostgresJsDatabase } from "drizzle-orm/postgres-js";
 import { accounts, importBatches, statementTallies, transactions } from "@/db/schema";
@@ -275,6 +275,7 @@ export async function createManualTransaction(
     description: string;
     direction: "incoming" | "outgoing";
     amountMinorUnits: number;
+    runningBalanceMinorUnits?: number;
     category: TransactionCategory | string;
     tags: string[];
     ownerUserId?: string;
@@ -288,6 +289,7 @@ export async function createManualTransaction(
   if (input.ownerUserId) {
     await requireOwnedAccount(db, input.accountId, input.ownerUserId);
   }
+  const balance = await resolveManualRunningBalance(db, input);
 
   const [transaction] = await db
     .insert(transactions)
@@ -302,7 +304,8 @@ export async function createManualTransaction(
       originalDescription: null,
       direction: input.direction,
       amountMinorUnits: input.amountMinorUnits,
-      runningBalanceMinorUnits: 0,
+      runningBalanceMinorUnits: balance.runningBalanceMinorUnits,
+      balanceEstimated: balance.estimated,
       category: input.category,
       categorySource: "manual",
       sourceFingerprint: `manual:${id}`,
@@ -313,6 +316,90 @@ export async function createManualTransaction(
     .returning();
 
   return transaction;
+}
+
+export async function backfillManualTransactionRunningBalances(db: Db) {
+  const manualTransactions = await db
+    .select()
+    .from(transactions)
+    .where(
+      and(
+        eq(transactions.sourceType, "manual"),
+        sql`${transactions.deletedAt} IS NULL`,
+        sql`${transactions.runningBalanceMinorUnits} = 0`,
+        sql`${transactions.balanceEstimated} = false`
+      )
+    )
+    .orderBy(asc(transactions.transactionDate), asc(transactions.createdAt));
+  let updatedCount = 0;
+
+  for (const transaction of manualTransactions) {
+    const balance = await resolveManualRunningBalance(db, {
+      accountId: transaction.accountId,
+      transactionDate: transaction.transactionDate,
+      direction: transaction.direction === "incoming" ? "incoming" : "outgoing",
+      amountMinorUnits: transaction.amountMinorUnits
+    });
+
+    await db
+      .update(transactions)
+      .set({
+        runningBalanceMinorUnits: balance.runningBalanceMinorUnits,
+        balanceEstimated: true
+      })
+      .where(eq(transactions.id, transaction.id));
+    updatedCount += 1;
+  }
+
+  return { updatedCount };
+}
+
+async function resolveManualRunningBalance(
+  db: Db,
+  input: {
+    accountId: string;
+    transactionDate: string;
+    direction: "incoming" | "outgoing";
+    amountMinorUnits: number;
+    runningBalanceMinorUnits?: number;
+  }
+) {
+  if (typeof input.runningBalanceMinorUnits === "number" && Number.isFinite(input.runningBalanceMinorUnits)) {
+    return {
+      runningBalanceMinorUnits: input.runningBalanceMinorUnits,
+      estimated: false
+    };
+  }
+
+  const [priorTransaction] = await db
+    .select({
+      runningBalanceMinorUnits: transactions.runningBalanceMinorUnits
+    })
+    .from(transactions)
+    .where(
+      and(
+        eq(transactions.accountId, input.accountId),
+        sql`${transactions.deletedAt} IS NULL`,
+        sql`${transactions.runningBalanceMinorUnits} <> 0`,
+        sql`${transactions.transactionDate} <= ${input.transactionDate}`
+      )
+    )
+    .orderBy(desc(transactions.transactionDate), desc(transactions.createdAt))
+    .limit(1);
+
+  if (!priorTransaction) {
+    return {
+      runningBalanceMinorUnits: 0,
+      estimated: true
+    };
+  }
+
+  const signedAmount = input.direction === "incoming" ? input.amountMinorUnits : -input.amountMinorUnits;
+
+  return {
+    runningBalanceMinorUnits: priorTransaction.runningBalanceMinorUnits + signedAmount,
+    estimated: true
+  };
 }
 
 export async function deleteTransaction(

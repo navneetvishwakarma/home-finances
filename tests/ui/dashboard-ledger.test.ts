@@ -32,12 +32,26 @@ test("renders category totals and review-first expandable ledger rows", () => {
   expect(html).toContain("INR 350.00");
   expect(html).toContain("Original description");
   expect(html).toContain("Running balance");
+  expect(html).toContain("Running balance after this transaction");
   expect(html).toContain("Source identity");
   expect(html).toContain("Edit transaction");
   expect(html).toContain("Delete transaction");
   expect(html).toContain("Manage import");
   expect(html).toContain("EMIs");
   expect(html).toContain("Education");
+});
+
+test("marks estimated running balances in ledger rows", () => {
+  const dashboard = createDashboard("manual-1", "Manual transactions", "manual-transactions");
+  dashboard.transactions[1].balanceEstimated = true;
+  const html = renderToStaticMarkup(
+    createElement(DashboardLedger, {
+      data: dashboard
+    })
+  );
+
+  expect(html).toContain("~INR 650.00");
+  expect(html).toContain("Estimated from the previous known balance");
 });
 
 test("renders a consolidated month dashboard with instrument sections", () => {
@@ -117,6 +131,7 @@ function createDashboard(
         direction: "incoming",
         amountMinorUnits: incomingMinorUnits,
         runningBalanceMinorUnits: incomingMinorUnits,
+        balanceEstimated: false,
         category: "income",
         categorySource: "system_rule",
         rowHash: `sha256:${importBatchId}-row-1`,
@@ -132,6 +147,7 @@ function createDashboard(
         direction: "outgoing",
         amountMinorUnits: outgoingMinorUnits,
         runningBalanceMinorUnits: netMovementMinorUnits,
+        balanceEstimated: false,
         category: "food",
         categorySource: "manual",
         rowHash: `sha256:${importBatchId}-row-2`,

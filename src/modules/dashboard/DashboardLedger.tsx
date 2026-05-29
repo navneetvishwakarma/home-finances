@@ -225,6 +225,10 @@ export function DashboardLedger({ data }: { data: DashboardData }) {
             <input name="amount" inputMode="decimal" placeholder="Amount" required />
           </label>
           <label>
+            <span>Running balance after this transaction</span>
+            <input name="runningBalance" inputMode="decimal" placeholder="Optional" />
+          </label>
+          <label>
             <span>Category</span>
             <select name="category" defaultValue="uncategorized">
               {transactionCategories.map((category) => (
@@ -276,7 +280,9 @@ export function DashboardLedger({ data }: { data: DashboardData }) {
                 </div>
                 <div>
                   <dt>Running balance</dt>
-                  <dd>{formatMoney(transaction.runningBalanceMinorUnits)}</dd>
+                  <dd title={transaction.balanceEstimated ? "Estimated from the previous known balance" : undefined}>
+                    {formatRunningBalance(transaction.runningBalanceMinorUnits, transaction.balanceEstimated)}
+                  </dd>
                 </div>
                 <div>
                   <dt>Category source</dt>
@@ -397,6 +403,10 @@ function formatMoney(minorUnits: number) {
     minimumFractionDigits: 2,
     maximumFractionDigits: 2
   })}`;
+}
+
+function formatRunningBalance(minorUnits: number, estimated?: boolean) {
+  return `${estimated ? "~" : ""}${formatMoney(minorUnits)}`;
 }
 
 function formatDate(value: string) {

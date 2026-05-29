@@ -188,6 +188,7 @@ export async function createManualTransactionAction(formData: FormData) {
   const description = String(formData.get("description") || "").trim();
   const direction = String(formData.get("direction") || "");
   const amount = String(formData.get("amount") || "0");
+  const runningBalance = String(formData.get("runningBalance") || "").trim();
   const category = String(formData.get("category") || "");
   const tags = String(formData.get("tags") || "")
     .split(",")
@@ -208,9 +209,14 @@ export async function createManualTransactionAction(formData: FormData) {
     }
 
     const amountMinorUnits = moneyToMinorUnits(amount);
+    const runningBalanceMinorUnits = runningBalance ? moneyToMinorUnits(runningBalance) : undefined;
 
     if (!Number.isFinite(amountMinorUnits) || amountMinorUnits <= 0) {
       throw new Error("Amount must be greater than zero");
+    }
+
+    if (runningBalance && !Number.isFinite(runningBalanceMinorUnits)) {
+      throw new Error("Running balance must be a valid amount");
     }
 
     const db = await getMigratedDatabase();
@@ -220,6 +226,7 @@ export async function createManualTransactionAction(formData: FormData) {
       description,
       direction: direction === "incoming" ? "incoming" : "outgoing",
       amountMinorUnits,
+      runningBalanceMinorUnits,
       category,
       tags,
       ownerUserId: currentUser.id
