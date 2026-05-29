@@ -2,6 +2,17 @@
 
 import { redirect } from "next/navigation";
 import { getMigratedDatabase } from "@/db/client";
+import {
+  clearCurrentSession,
+  requireCurrentUser,
+  setSessionCookie
+} from "@/modules/auth/session";
+import {
+  createSession,
+  ensureBootstrapAdmin,
+  findUserByEmail,
+  verifyPassword
+} from "@/modules/auth/persistence";
 import { runIciciCsvImport } from "@/modules/imports/import-flow";
 import {
   createManualTransaction,
@@ -12,6 +23,7 @@ import {
 } from "@/modules/imports/persistence";
 
 export async function importIciciStatement(formData: FormData) {
+  await requireCurrentUser();
   const accountDisplayName = String(formData.get("accountDisplayName") || "Primary account").trim();
   const statements = formData
     .getAll("statements")
@@ -49,7 +61,36 @@ export async function importIciciStatement(formData: FormData) {
   redirect(latestImportedMonth ? `/?month=${latestImportedMonth}` : "/");
 }
 
+export async function loginAction(formData: FormData) {
+  const email = String(formData.get("email") || "");
+  const password = String(formData.get("password") || "");
+
+  try {
+    const db = await getMigratedDatabase();
+    await ensureBootstrapAdmin(db);
+    const user = await findUserByEmail(db, email);
+
+    if (!user || !user.active || !(await verifyPassword(password, user.passwordHash))) {
+      throw new Error("Invalid email or password");
+    }
+
+    const session = await createSession(db, { userId: user.id });
+    await setSessionCookie(session.token);
+  } catch (error) {
+    const message = error instanceof Error ? error.message : "Login failed";
+    redirect(`/?error=${encodeURIComponent(message)}`);
+  }
+
+  redirect("/");
+}
+
+export async function logoutAction() {
+  await clearCurrentSession();
+  redirect("/");
+}
+
 export async function updateTransactionCategoryAction(formData: FormData) {
+  await requireCurrentUser();
   const transactionId = String(formData.get("transactionId") || "");
   const importBatchId = String(formData.get("importBatchId") || "");
   const category = String(formData.get("category") || "");
@@ -68,6 +109,7 @@ export async function updateTransactionCategoryAction(formData: FormData) {
 }
 
 export async function updateTransactionDetailsAction(formData: FormData) {
+  await requireCurrentUser();
   const transactionId = String(formData.get("transactionId") || "");
   const importBatchId = String(formData.get("importBatchId") || "");
   const description = String(formData.get("description") || "").trim();
@@ -94,6 +136,7 @@ export async function updateTransactionDetailsAction(formData: FormData) {
 }
 
 export async function deleteTransactionAction(formData: FormData) {
+  await requireCurrentUser();
   const transactionId = String(formData.get("transactionId") || "");
   const importBatchId = String(formData.get("importBatchId") || "");
   let redirectTarget = importBatchId ? `/?importBatchId=${importBatchId}` : "/";
@@ -111,6 +154,7 @@ export async function deleteTransactionAction(formData: FormData) {
 }
 
 export async function createManualTransactionAction(formData: FormData) {
+  await requireCurrentUser();
   const accountId = String(formData.get("accountId") || "");
   const importBatchId = String(formData.get("importBatchId") || "");
   const transactionDate = String(formData.get("transactionDate") || "");
@@ -162,6 +206,7 @@ export async function createManualTransactionAction(formData: FormData) {
 }
 
 export async function deleteImportBatchAction(formData: FormData) {
+  await requireCurrentUser();
   const importBatchId = String(formData.get("importBatchId") || "");
 
   try {

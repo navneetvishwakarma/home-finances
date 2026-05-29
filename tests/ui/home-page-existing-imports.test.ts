@@ -6,6 +6,19 @@ vi.mock("@/db/client", () => ({
   getMigratedDatabase: vi.fn(async () => ({}))
 }));
 
+vi.mock("@/modules/auth/session", () => ({
+  getCurrentUser: vi.fn(async () => ({
+    id: "user-1",
+    email: "admin@example.com",
+    displayName: "Admin User",
+    role: "admin",
+    active: true,
+    passwordHash: "hash",
+    createdAt: new Date(),
+    updatedAt: new Date()
+  }))
+}));
+
 vi.mock("@/modules/imports/persistence", () => ({
   getImportDashboard: vi.fn(),
   isCompleteImportDashboard: vi.fn((dashboard) => Boolean(dashboard.importBatch && dashboard.tally)),

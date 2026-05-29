@@ -83,7 +83,8 @@ function isAllowedValue(value) {
     lowerValue.includes("postgres:postgres@localhost") ||
     lowerValue.includes("postgres://postgres:tmkdmtad@2@localhost") ||
     lowerValue.includes("example") ||
-    lowerValue.includes("placeholder")
+    lowerValue.includes("placeholder") ||
+    lowerValue.includes("replace-with")
   );
 }
 

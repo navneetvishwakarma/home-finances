@@ -1,6 +1,7 @@
 import React from "react";
 import { getMigratedDatabase } from "@/db/client";
-import { importIciciStatement } from "@/app/actions";
+import { importIciciStatement, loginAction, logoutAction } from "@/app/actions";
+import { getCurrentUser } from "@/modules/auth/session";
 import { MonthDashboard } from "@/modules/dashboard/DashboardLedger";
 import {
   getAvailableLedgerMonths,
@@ -19,6 +20,12 @@ type SearchParams = Promise<{
 
 export default async function HomePage({ searchParams }: { searchParams: SearchParams }) {
   const params = await searchParams;
+  const currentUser = await getCurrentUser();
+
+  if (!currentUser) {
+    return <LoginPage error={params.error} />;
+  }
+
   const loadedView = await loadMonthView(params).catch((error) => {
     if (error instanceof Error && error.message.includes("DATABASE_URL")) {
       return { availableMonths: [], selectedMonth: "", dashboards: [] };
@@ -37,10 +44,16 @@ export default async function HomePage({ searchParams }: { searchParams: SearchP
           <p className="eyebrow">FinState Command Centre</p>
           <h1>Complete month view across every instrument</h1>
         </div>
-        <div className="status-strip" aria-label="Import readiness">
-          <span>Multi-file month close</span>
-          <span>All instruments</span>
-          <span>INR consolidation</span>
+        <div className="header-actions">
+          <div className="status-strip" aria-label="Import readiness">
+            <span>Multi-file month close</span>
+            <span>All instruments</span>
+            <span>INR consolidation</span>
+          </div>
+          <form action={logoutAction} className="user-session">
+            <span>{currentUser.displayName}</span>
+            <button type="submit">Sign out</button>
+          </form>
         </div>
       </header>
 
@@ -130,6 +143,36 @@ export default async function HomePage({ searchParams }: { searchParams: SearchP
           )}
         </section>
       </div>
+    </main>
+  );
+}
+
+function LoginPage({ error }: { error?: string }) {
+  return (
+    <main className="auth-shell">
+      <section className="auth-panel" aria-labelledby="login-heading">
+        <div>
+          <p className="eyebrow">FinState Command Centre</p>
+          <h1 id="login-heading">Sign in to FinState</h1>
+          <p>Access your private finance reconciliation workspace.</p>
+        </div>
+
+        {error ? <p className="error-banner">{error}</p> : null}
+
+        <form action={loginAction}>
+          <label className="field">
+            <span>Email</span>
+            <input name="email" type="email" autoComplete="email" required />
+          </label>
+          <label className="field">
+            <span>Password</span>
+            <input name="password" type="password" autoComplete="current-password" required />
+          </label>
+          <button className="primary-action" type="submit">
+            Sign in
+          </button>
+        </form>
+      </section>
     </main>
   );
 }
