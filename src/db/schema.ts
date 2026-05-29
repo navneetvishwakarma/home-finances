@@ -1,15 +1,4 @@
-import {
-  bigint,
-  boolean,
-  date,
-  integer,
-  jsonb,
-  pgTable,
-  text,
-  timestamp,
-  unique,
-  uuid
-} from "drizzle-orm/pg-core";
+import { bigint, boolean, date, integer, jsonb, pgTable, text, timestamp, unique, uuid } from "drizzle-orm/pg-core";
 
 export const accounts = pgTable("accounts", {
   id: uuid("id").primaryKey(),
@@ -20,35 +9,6 @@ export const accounts = pgTable("accounts", {
   active: boolean("active").notNull().default(true),
   createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow()
 });
-
-export const appUsers = pgTable(
-  "app_users",
-  {
-    id: uuid("id").primaryKey(),
-    email: text("email").notNull(),
-    displayName: text("display_name").notNull(),
-    passwordHash: text("password_hash").notNull(),
-    role: text("role").notNull().default("user"),
-    active: boolean("active").notNull().default(true),
-    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
-    updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow()
-  },
-  (table) => ({
-    emailUnique: unique("app_users_email_unique").on(table.email)
-  })
-);
-
-export const userSessions = pgTable("user_sessions", {
-  id: uuid("id").primaryKey(),
-  userId: uuid("user_id")
-    .notNull()
-    .references(() => appUsers.id),
-  tokenHash: text("token_hash").notNull(),
-  expiresAt: timestamp("expires_at", { withTimezone: true }).notNull(),
-  createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow()
-}, (table) => ({
-  tokenHashUnique: unique("user_sessions_token_hash_unique").on(table.tokenHash)
-}));
 
 export const importBatches = pgTable(
   "import_batches",

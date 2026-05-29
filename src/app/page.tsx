@@ -1,6 +1,6 @@
 import React from "react";
 import { getMigratedDatabase } from "@/db/client";
-import { importIciciStatement, loginAction, logoutAction } from "@/app/actions";
+import { importIciciStatement, loginAction, logoutAction, signupAction } from "@/app/actions";
 import { getCurrentUser } from "@/modules/auth/session";
 import { MonthDashboard } from "@/modules/dashboard/DashboardLedger";
 import {
@@ -16,6 +16,7 @@ type SearchParams = Promise<{
   importBatchIds?: string;
   month?: string;
   error?: string;
+  success?: string;
 }>;
 
 export default async function HomePage({ searchParams }: { searchParams: SearchParams }) {
@@ -23,7 +24,7 @@ export default async function HomePage({ searchParams }: { searchParams: SearchP
   const currentUser = await getCurrentUser();
 
   if (!currentUser) {
-    return <LoginPage error={params.error} />;
+    return <LoginPage error={params.error} success={params.success} />;
   }
 
   const loadedView = await loadMonthView(params).catch((error) => {
@@ -147,7 +148,7 @@ export default async function HomePage({ searchParams }: { searchParams: SearchP
   );
 }
 
-function LoginPage({ error }: { error?: string }) {
+function LoginPage({ error, success }: { error?: string; success?: string }) {
   return (
     <main className="auth-shell">
       <section className="auth-panel" aria-labelledby="login-heading">
@@ -158,6 +159,7 @@ function LoginPage({ error }: { error?: string }) {
         </div>
 
         {error ? <p className="error-banner">{error}</p> : null}
+        {success ? <p className="success-banner">{success}</p> : null}
 
         <form action={loginAction}>
           <label className="field">
@@ -170,6 +172,27 @@ function LoginPage({ error }: { error?: string }) {
           </label>
           <button className="primary-action" type="submit">
             Sign in
+          </button>
+        </form>
+
+        <div className="auth-divider" aria-hidden="true" />
+
+        <form action={signupAction}>
+          <h2>Create account</h2>
+          <label className="field">
+            <span>Name</span>
+            <input name="displayName" type="text" autoComplete="name" required />
+          </label>
+          <label className="field">
+            <span>Email</span>
+            <input name="email" type="email" autoComplete="email" required />
+          </label>
+          <label className="field">
+            <span>Password</span>
+            <input name="password" type="password" autoComplete="new-password" required />
+          </label>
+          <button className="secondary-action" type="submit">
+            Create account
           </button>
         </form>
       </section>
