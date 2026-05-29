@@ -32,6 +32,10 @@ FinState is a personal finance operations cockpit. The interface should feel pre
 - Put reconciliation metrics before tables.
 - Keep category editing inline so users do not lose ledger context.
 - Tables must remain horizontally scrollable on small screens.
+- Treat month close as the primary workflow: upload every file for the month first, then review one consolidated summary.
+- Use instrument-level tabs or anchored sections so bank accounts and credit card billing files remain separable after consolidation.
+- Visually encode incoming and outgoing money everywhere amounts appear. Incoming uses emerald treatment, outgoing uses coral treatment.
+- For credit cards, tell users that mid-month billing cycles usually require two adjacent statement files for a full calendar-month view.
 
 ## Avoid
 
@@ -40,3 +44,4 @@ FinState is a personal finance operations cockpit. The interface should feel pre
 - Low-contrast glass surfaces.
 - Marketing hero layout.
 - Nested cards.
+- A single-file mental model for month-close workflows.

@@ -8,6 +8,8 @@ These instructions apply to this repository.
 - Do not write production code before a failing test demonstrates the required behavior.
 - Implement user stories as vertical slices. Include UI, API or server actions, domain logic, database changes, and tests together when the story needs them.
 - Keep implementation scoped to the current issue. Do not build hidden infrastructure for later slices.
+- Before running tests, set `TEST_DATABASE_URL` in PowerShell:
+  `$env:TEST_DATABASE_URL="postgres://postgres:Tmkdmtad@2@localhost:5432/home-finances-dev"`
 
 ## Branch And Commit Policy
 
