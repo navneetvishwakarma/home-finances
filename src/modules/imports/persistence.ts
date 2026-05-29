@@ -172,29 +172,63 @@ export async function persistParsedTransactions(
         category: classification.category,
         categorySource: classification.categorySource,
         sourceFingerprint: sourceFingerprint(input.sourceProfileId, rowHash),
+        globalRowFingerprint: globalRowFingerprint(input.sourceProfileId, {
+          transactionDate: row.transactionDate,
+          description: row.description,
+          direction,
+          amountMinorUnits: amount,
+          runningBalanceMinorUnits: moneyToMinorUnits(row.balance)
+        }),
         rowHash,
         rawSourcePayload: row.rawRow,
         tags: []
       };
     })
   );
+  const persistedTransactions = [];
+  let skippedCount = 0;
 
-  return db
-    .insert(transactions)
-    .values(values)
-    .onConflictDoUpdate({
-      target: [transactions.accountId, transactions.sourceFingerprint],
-      set: {
-        deletedAt: null,
-        transactionDate: sql`excluded.transaction_date`,
-        direction: sql`excluded.direction`,
-        amountMinorUnits: sql`excluded.amount_minor_units`,
-        runningBalanceMinorUnits: sql`excluded.running_balance_minor_units`,
-        rawSourcePayload: sql`excluded.raw_source_payload`,
-        sourceRowId: sql`excluded.source_row_id`
+  for (const value of values) {
+    try {
+      const [transaction] = await db.insert(transactions).values(value).returning();
+      persistedTransactions.push(transaction);
+    } catch (error) {
+      if (isDuplicateTransactionImportBatchRowHash(error)) {
+        const [transaction] = await restoreImportBatchRowHashTransaction(db, value);
+        if (transaction) {
+          persistedTransactions.push(transaction);
+          continue;
+        }
       }
-    })
-    .returning();
+
+      if (isDuplicateTransactionSourceFingerprint(error)) {
+        const [transaction] = await restoreSourceFingerprintTransaction(db, value);
+        if (transaction) {
+          persistedTransactions.push(transaction);
+          continue;
+        }
+      }
+
+      if (isDuplicateTransactionGlobalFingerprint(error)) {
+        const transaction = await resolveGlobalFingerprintConflict(db, value);
+        if (transaction) {
+          persistedTransactions.push(transaction);
+        } else {
+          skippedCount += 1;
+        }
+        continue;
+      }
+
+      throw error;
+    }
+  }
+
+  await db
+    .update(importBatches)
+    .set({ skippedRowCount: skippedCount })
+    .where(eq(importBatches.id, input.importBatchId));
+
+  return Object.assign(persistedTransactions, { skippedCount });
 }
 
 export async function updateTransactionCategory(
@@ -309,6 +343,7 @@ export async function createManualTransaction(
       category: input.category,
       categorySource: "manual",
       sourceFingerprint: `manual:${id}`,
+      globalRowFingerprint: `manual:${id}`,
       rowHash: `manual:${id}`,
       rawSourcePayload: { source: "manual" },
       tags: normalizeTags(input.tags)
@@ -478,6 +513,42 @@ export async function computeStatementTally(
   const netMovementMinorUnits = totalIncomingMinorUnits - totalOutgoingMinorUnits;
   const firstRow = orderedRows[0];
   const lastRow = orderedRows[orderedRows.length - 1];
+  if (!firstRow || !lastRow) {
+    const [tally] = await db
+      .insert(statementTallies)
+      .values({
+        id: randomUUID(),
+        accountId: input.accountId,
+        importBatchId: input.importBatchId,
+        totalIncomingMinorUnits: 0,
+        totalOutgoingMinorUnits: 0,
+        netMovementMinorUnits: 0,
+        openingBalanceMinorUnits: 0,
+        closingBalanceMinorUnits: 0,
+        calculatedClosingBalanceMinorUnits: 0,
+        differenceMinorUnits: 0
+      })
+      .onConflictDoUpdate({
+        target: statementTallies.importBatchId,
+        set: {
+          totalIncomingMinorUnits: 0,
+          totalOutgoingMinorUnits: 0,
+          netMovementMinorUnits: 0,
+          openingBalanceMinorUnits: 0,
+          closingBalanceMinorUnits: 0,
+          calculatedClosingBalanceMinorUnits: 0,
+          differenceMinorUnits: 0
+        }
+      })
+      .returning();
+
+    await db
+      .update(importBatches)
+      .set({ status: "imported" })
+      .where(eq(importBatches.id, input.importBatchId));
+
+    return tally;
+  }
   const firstSignedMovement =
     firstRow.direction === "incoming" ? firstRow.amountMinorUnits : -firstRow.amountMinorUnits;
   const openingBalanceMinorUnits = firstRow.runningBalanceMinorUnits - firstSignedMovement;
@@ -698,6 +769,149 @@ function sourceFingerprint(sourceProfileId = "unknown-source-profile", rowHash: 
   return `${sourceProfileId}:${rowHash}`;
 }
 
+function globalRowFingerprint(
+  sourceProfileId = "unknown-source-profile",
+  input: {
+    transactionDate: string;
+    description: string;
+    direction: string;
+    amountMinorUnits: number;
+    runningBalanceMinorUnits: number;
+  }
+) {
+  return [
+    sourceProfileId,
+    input.transactionDate,
+    normalizeFingerprintText(input.description),
+    input.direction,
+    String(input.amountMinorUnits),
+    String(input.runningBalanceMinorUnits)
+  ].join("|");
+}
+
+function normalizeFingerprintText(value: string) {
+  return value.trim().replace(/\s+/g, " ").toLowerCase();
+}
+
+function isDuplicateTransactionSourceFingerprint(error: unknown) {
+  return isDuplicateConstraint(error, "transactions_account_source_fingerprint_unique");
+}
+
+function isDuplicateTransactionGlobalFingerprint(error: unknown) {
+  return isDuplicateConstraint(error, "transactions_account_global_row_fingerprint_unique");
+}
+
+function isDuplicateTransactionImportBatchRowHash(error: unknown) {
+  return isDuplicateConstraint(error, "transactions_import_batch_row_hash_unique");
+}
+
+function isDuplicateConstraint(error: unknown, constraint: string): boolean {
+  if (typeof error !== "object" || error === null) {
+    return false;
+  }
+
+  const errorRecord = error as Record<string, unknown>;
+  const message = "message" in errorRecord ? String(errorRecord.message) : "";
+  const constraintName =
+    "constraint_name" in errorRecord
+      ? String(errorRecord.constraint_name)
+      : "constraint" in errorRecord
+        ? String(errorRecord.constraint)
+        : "";
+
+  if (errorRecord.code === "23505" && (constraintName === constraint || message.includes(constraint))) {
+    return true;
+  }
+
+  return isDuplicateConstraint(errorRecord.cause, constraint);
+}
+
+async function restoreSourceFingerprintTransaction(
+  db: Db,
+  value: typeof transactions.$inferInsert
+) {
+  return db
+    .update(transactions)
+    .set({
+      deletedAt: null,
+      transactionDate: value.transactionDate,
+      direction: value.direction,
+      amountMinorUnits: value.amountMinorUnits,
+      runningBalanceMinorUnits: value.runningBalanceMinorUnits,
+      globalRowFingerprint: value.globalRowFingerprint,
+      rawSourcePayload: value.rawSourcePayload,
+      sourceRowId: value.sourceRowId
+    })
+    .where(
+      and(
+        eq(transactions.accountId, value.accountId),
+        eq(transactions.sourceFingerprint, value.sourceFingerprint)
+      )
+    )
+    .returning();
+}
+
+async function restoreImportBatchRowHashTransaction(
+  db: Db,
+  value: typeof transactions.$inferInsert
+) {
+  if (!value.importBatchId) {
+    return [];
+  }
+
+  return db
+    .update(transactions)
+    .set({
+      deletedAt: null,
+      transactionDate: value.transactionDate,
+      direction: value.direction,
+      amountMinorUnits: value.amountMinorUnits,
+      runningBalanceMinorUnits: value.runningBalanceMinorUnits,
+      sourceFingerprint: value.sourceFingerprint,
+      globalRowFingerprint: value.globalRowFingerprint,
+      rawSourcePayload: value.rawSourcePayload,
+      sourceRowId: value.sourceRowId
+    })
+    .where(
+      and(
+        eq(transactions.importBatchId, value.importBatchId),
+        eq(transactions.rowHash, value.rowHash)
+      )
+    )
+    .returning();
+}
+
+async function resolveGlobalFingerprintConflict(
+  db: Db,
+  value: typeof transactions.$inferInsert
+) {
+  const [existingTransaction] = await db
+    .select()
+    .from(transactions)
+    .where(
+      and(
+        eq(transactions.accountId, value.accountId),
+        eq(transactions.globalRowFingerprint, value.globalRowFingerprint)
+      )
+    )
+    .limit(1);
+
+  if (!existingTransaction) {
+    return null;
+  }
+
+  if (existingTransaction.sourceFingerprint === value.sourceFingerprint || existingTransaction.deletedAt) {
+    const [restoredTransaction] = await db
+      .update(transactions)
+      .set({ deletedAt: null })
+      .where(eq(transactions.id, existingTransaction.id))
+      .returning();
+    return restoredTransaction;
+  }
+
+  return null;
+}
+
 function nextMonthStart(month: string) {
   const [year, monthNumber] = month.split("-").map(Number);
   const nextMonth = monthNumber === 12 ? 1 : monthNumber + 1;
@@ -778,6 +992,7 @@ function buildManualMonthDashboards(
         fileFingerprint: syntheticImportBatchId,
         rawSource: "manual",
         status: "imported",
+        skippedRowCount: 0,
         importedAt: new Date()
       },
       tally: {
