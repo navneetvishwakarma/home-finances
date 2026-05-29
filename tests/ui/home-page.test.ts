@@ -14,6 +14,14 @@ vi.mock("@/modules/imports/persistence", () => ({
   getImportDashboard: vi.fn(),
   getLatestImportDashboards: vi.fn(async () => []),
   getAvailableLedgerMonths: vi.fn(async () => []),
+  getConsolidatedMonthTally: vi.fn(async () => ({
+    month: "",
+    totalIncomingMinorUnits: 0,
+    totalOutgoingMinorUnits: 0,
+    netMovementMinorUnits: 0,
+    instrumentCount: 0,
+    manualTransactionCount: 0
+  })),
   getAccountMetadataSummary: vi.fn(async () => ({
     accountCount: 2,
     sourceProfiles: ["icici-bank-csv", "hdfc-bank-csv"]

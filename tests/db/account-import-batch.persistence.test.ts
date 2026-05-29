@@ -20,6 +20,7 @@ import {
   deleteTransaction,
   deleteImportBatch,
   getAvailableLedgerMonths,
+  getConsolidatedMonthTally,
   getMonthDashboards,
   uploadIciciCsvForAccount
 } from "@/modules/imports/persistence";
@@ -987,6 +988,98 @@ test("lists ledger months from active transaction dates with latest month first"
   const months = await getAvailableLedgerMonths(db);
 
   expect(months.slice(0, 2)).toEqual(["2026-04", "2026-03"]);
+});
+
+test("computes a consolidated month tally across accounts including manual transactions", async () => {
+  const ownerUserId = "consolidated-month-user";
+  const bankAccount = await createAccount(db, {
+    displayName: "Consolidated Bank Account",
+    providerLabel: "ICICI Bank",
+    currency: "INR",
+    ownerUserId
+  });
+  const cardAccount = await createAccount(db, {
+    displayName: "Consolidated Card Account",
+    providerLabel: "ICICI Card",
+    currency: "INR",
+    ownerUserId
+  });
+  const bankImportBatch = await createImportBatch(db, {
+    accountId: bankAccount.id,
+    sourceProfileId: "icici-bank-csv",
+    filename: "bank-april.csv",
+    fileFingerprint: "sha256:bank-april",
+    rawSource: "csv",
+    status: "uploaded"
+  });
+  const cardImportBatch = await createImportBatch(db, {
+    accountId: cardAccount.id,
+    sourceProfileId: "icici-credit-card-csv",
+    filename: "card-april.csv",
+    fileFingerprint: "sha256:card-april",
+    rawSource: "csv",
+    status: "uploaded"
+  });
+  await persistParsedTransactions(db, {
+    accountId: bankAccount.id,
+    importBatchId: bankImportBatch.id,
+    sourceProfileId: "icici-bank-csv",
+    rows: [
+      {
+        valueDate: "2026-04-03",
+        transactionDate: "2026-04-03",
+        description: "APRIL SALARY",
+        withdrawalAmount: "0.00",
+        depositAmount: "80000.00",
+        balance: "90000.00",
+        rawRow: { "S No.": "1", "Transaction Remarks": "APRIL SALARY" }
+      },
+      {
+        valueDate: "2026-04-04",
+        transactionDate: "2026-04-04",
+        description: "UPI GROCERIES",
+        withdrawalAmount: "5000.00",
+        depositAmount: "0.00",
+        balance: "85000.00",
+        rawRow: { "S No.": "2", "Transaction Remarks": "UPI GROCERIES" }
+      }
+    ]
+  });
+  await persistParsedTransactions(db, {
+    accountId: cardAccount.id,
+    importBatchId: cardImportBatch.id,
+    sourceProfileId: "icici-credit-card-csv",
+    rows: [
+      {
+        valueDate: "2026-04-05",
+        transactionDate: "2026-04-05",
+        description: "CARD RESTAURANT",
+        withdrawalAmount: "10000.00",
+        depositAmount: "0.00",
+        balance: "75000.00",
+        rawRow: { "S No.": "1", "Transaction Remarks": "CARD RESTAURANT" }
+      }
+    ]
+  });
+  await createManualTransaction(db, {
+    accountId: bankAccount.id,
+    transactionDate: "2026-04-06",
+    description: "Manual cash income",
+    direction: "incoming",
+    amountMinorUnits: 200000,
+    category: "income",
+    tags: []
+  });
+
+  const tally = await getConsolidatedMonthTally(db, "2026-04", ownerUserId);
+
+  expect(tally).toMatchObject({
+    totalIncomingMinorUnits: 8200000,
+    totalOutgoingMinorUnits: 1500000,
+    netMovementMinorUnits: 6700000,
+    instrumentCount: 2,
+    manualTransactionCount: 1
+  });
 });
 
 test("includes manual transactions in the selected month view", async () => {

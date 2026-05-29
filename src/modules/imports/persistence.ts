@@ -687,6 +687,48 @@ export async function getAccountMetadataSummary(db: Db, ownerUserId?: string) {
   };
 }
 
+export async function getConsolidatedMonthTally(db: Db, month: string, ownerUserId?: string) {
+  if (!/^\d{4}-\d{2}$/.test(month)) {
+    return {
+      month,
+      totalIncomingMinorUnits: 0,
+      totalOutgoingMinorUnits: 0,
+      netMovementMinorUnits: 0,
+      instrumentCount: 0,
+      manualTransactionCount: 0
+    };
+  }
+
+  const startDate = `${month}-01`;
+  const endDate = nextMonthStart(month);
+  const ledgerRows = await db
+    .select()
+    .from(transactions)
+    .where(
+      and(
+        gte(transactions.transactionDate, startDate),
+        lt(transactions.transactionDate, endDate),
+        sql`${transactions.deletedAt} IS NULL`,
+        accountOwnerCondition(transactions.accountId, ownerUserId)
+      )
+    );
+  const totalIncomingMinorUnits = ledgerRows
+    .filter((transaction) => transaction.direction === "incoming")
+    .reduce((total, transaction) => total + transaction.amountMinorUnits, 0);
+  const totalOutgoingMinorUnits = ledgerRows
+    .filter((transaction) => transaction.direction === "outgoing")
+    .reduce((total, transaction) => total + transaction.amountMinorUnits, 0);
+
+  return {
+    month,
+    totalIncomingMinorUnits,
+    totalOutgoingMinorUnits,
+    netMovementMinorUnits: totalIncomingMinorUnits - totalOutgoingMinorUnits,
+    instrumentCount: new Set(ledgerRows.map((transaction) => transaction.accountId)).size,
+    manualTransactionCount: ledgerRows.filter((transaction) => transaction.sourceType === "manual").length
+  };
+}
+
 export async function getMonthDashboards(db: Db, month: string, ownerUserId?: string) {
   if (!/^\d{4}-\d{2}$/.test(month)) {
     return [];

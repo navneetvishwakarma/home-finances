@@ -60,23 +60,34 @@ test("renders a consolidated month dashboard with instrument sections", () => {
       dashboards: [
         createDashboard("import-1", "icici-bank-april.csv", "icici-bank-csv"),
         createDashboard("import-2", "icici-card-mar-apr.csv", "icici-credit-card-csv", {
+          accountId: "account-2",
           incomingMinorUnits: 25000,
           outgoingMinorUnits: 90000
         }),
         createDashboard("import-3", "icici-card-apr-may.csv", "icici-credit-card-csv", {
+          accountId: "account-2",
           incomingMinorUnits: 0,
           outgoingMinorUnits: 70000
         })
-      ]
+      ],
+      consolidatedTally: {
+        month: "2026-04",
+        totalIncomingMinorUnits: 125000,
+        totalOutgoingMinorUnits: 195000,
+        netMovementMinorUnits: -70000,
+        instrumentCount: 2,
+        manualTransactionCount: 1
+      }
     })
   );
 
   expect(html).toContain("Complete month view");
-  expect(html).toContain("Consolidation summary");
+  expect(html).toContain("Month summary");
   expect(html).toContain("All instruments");
   expect(html).toContain("ICICI bank");
   expect(html).toContain("ICICI credit card");
-  expect(html).toContain("3 files uploaded");
+  expect(html).toContain("2 instruments");
+  expect(html).toContain("includes 1 manual entry");
   expect(html).toContain("Credit card coverage");
   expect(html).toContain("2 billing files");
   expect(html).toContain("Instrument transactions");
@@ -84,15 +95,36 @@ test("renders a consolidated month dashboard with instrument sections", () => {
   expect(html).toContain("INR 1,950.00");
 });
 
+test("does not render a consolidated card for a single instrument", () => {
+  const html = renderToStaticMarkup(
+    createElement(MonthDashboard, {
+      dashboards: [createDashboard("import-1", "icici-bank-april.csv", "icici-bank-csv")],
+      consolidatedTally: {
+        month: "2026-04",
+        totalIncomingMinorUnits: 100000,
+        totalOutgoingMinorUnits: 35000,
+        netMovementMinorUnits: 65000,
+        instrumentCount: 1,
+        manualTransactionCount: 0
+      }
+    })
+  );
+
+  expect(html).not.toContain("Month summary");
+  expect(html).toContain("statement total");
+});
+
 function createDashboard(
   importBatchId: string,
   filename: string,
   sourceProfileId: string,
   overrides: {
+    accountId?: string;
     incomingMinorUnits?: number;
     outgoingMinorUnits?: number;
   } = {}
 ) {
+  const accountId = overrides.accountId ?? "account-1";
   const incomingMinorUnits = overrides.incomingMinorUnits ?? 100000;
   const outgoingMinorUnits = overrides.outgoingMinorUnits ?? 35000;
   const netMovementMinorUnits = incomingMinorUnits - outgoingMinorUnits;
@@ -100,17 +132,18 @@ function createDashboard(
   return {
     importBatch: {
       id: importBatchId,
-      accountId: "account-1",
+      accountId,
       sourceProfileId,
       filename,
       fileFingerprint: `sha256:${importBatchId}`,
       rawSource: "csv",
       status: "imported",
+      skippedRowCount: 0,
       importedAt: new Date()
     },
     tally: {
       id: `tally-${importBatchId}`,
-      accountId: "account-1",
+      accountId,
       importBatchId,
       totalIncomingMinorUnits: incomingMinorUnits,
       totalOutgoingMinorUnits: outgoingMinorUnits,
@@ -124,7 +157,7 @@ function createDashboard(
     transactions: [
       {
         id: `txn-${importBatchId}-1`,
-        accountId: "account-1",
+        accountId,
         importBatchId,
         transactionDate: "2026-04-01",
         description: "APRIL SALARY CREDIT",
@@ -140,7 +173,7 @@ function createDashboard(
       },
       {
         id: `txn-${importBatchId}-2`,
-        accountId: "account-1",
+        accountId,
         importBatchId,
         transactionDate: "2026-04-02",
         description: "UPI GROCERY STORE",

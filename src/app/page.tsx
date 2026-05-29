@@ -9,6 +9,7 @@ import {
   type CompleteImportDashboard,
   getAccountMetadataSummary,
   getAvailableLedgerMonths,
+  getConsolidatedMonthTally,
   getImportDashboard,
   getLatestImportDashboards,
   getMonthDashboards,
@@ -45,6 +46,7 @@ export default async function HomePage({ searchParams }: { searchParams: SearchP
       : emptyMonthView();
   const { availableMonths, selectedMonth } = loadedView;
   const loadedDashboards = loadedView.dashboards;
+  const consolidatedTally = loadedView.consolidatedTally;
   const dashboards = loadedDashboards.filter(isCompleteImportDashboard);
   const metadataSummary =
     selectedView === "metadata" ? await loadMetadataSummary(currentUser.id).catch(emptyMetadataSummary) : null;
@@ -74,6 +76,7 @@ export default async function HomePage({ searchParams }: { searchParams: SearchP
           ) : (
             <TransactionsView
               availableMonths={availableMonths}
+              consolidatedTally={consolidatedTally}
               dashboards={dashboards}
               selectedMonth={selectedMonth}
             />
@@ -136,10 +139,12 @@ function Toasts({ error, success }: { error?: string; success?: string }) {
 
 function TransactionsView({
   availableMonths,
+  consolidatedTally,
   dashboards,
   selectedMonth
 }: {
   availableMonths: string[];
+  consolidatedTally: Awaited<ReturnType<typeof getConsolidatedMonthTally>> | null;
   dashboards: CompleteImportDashboard[];
   selectedMonth: string;
 }) {
@@ -210,7 +215,7 @@ function TransactionsView({
           </button>
         </form>
         {dashboards.length > 0 ? (
-          <MonthDashboard dashboards={dashboards} />
+          <MonthDashboard consolidatedTally={consolidatedTally} dashboards={dashboards} />
         ) : (
           <div className="empty-state">
             <p className="section-kicker">Month cockpit</p>
@@ -356,6 +361,7 @@ async function loadMonthView(params: Awaited<SearchParams>, ownerUserId: string)
     return {
       availableMonths,
       selectedMonth,
+      consolidatedTally: await getConsolidatedMonthTally(db, selectedMonth, ownerUserId),
       dashboards: await getMonthDashboards(db, selectedMonth, ownerUserId)
     };
   }
@@ -363,6 +369,7 @@ async function loadMonthView(params: Awaited<SearchParams>, ownerUserId: string)
   return {
     availableMonths,
     selectedMonth,
+    consolidatedTally: null,
     dashboards: await loadDashboards(params, ownerUserId)
   };
 }
@@ -373,7 +380,7 @@ async function loadMetadataSummary(ownerUserId: string) {
 }
 
 function emptyMonthView() {
-  return { availableMonths: [], selectedMonth: "", dashboards: [] };
+  return { availableMonths: [], selectedMonth: "", consolidatedTally: null, dashboards: [] };
 }
 
 function emptyMetadataSummary() {
