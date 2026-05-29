@@ -487,6 +487,19 @@ export async function getAvailableLedgerMonths(db: Db) {
   );
 }
 
+export async function getAccountMetadataSummary(db: Db) {
+  const [accountCountRow] = await db.select({ count: sql<number>`count(*)::int` }).from(accounts);
+  const profileRows = await db
+    .select({ sourceProfileId: importBatches.sourceProfileId })
+    .from(importBatches)
+    .where(sql`${importBatches.status} <> 'deleted'`);
+
+  return {
+    accountCount: accountCountRow?.count ?? 0,
+    sourceProfiles: Array.from(new Set(profileRows.map((row) => row.sourceProfileId))).sort()
+  };
+}
+
 export async function getMonthDashboards(db: Db, month: string) {
   if (!/^\d{4}-\d{2}$/.test(month)) {
     return [];

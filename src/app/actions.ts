@@ -49,7 +49,7 @@ export async function importIciciStatement(formData: FormData) {
   }
 
   const latestImportedMonth = [...importedMonths].sort((left, right) => right.localeCompare(left))[0];
-  redirect(latestImportedMonth ? `/?month=${latestImportedMonth}` : "/");
+  redirect(latestImportedMonth ? `/?month=${latestImportedMonth}&success=Import%20complete` : "/?success=Import%20complete");
 }
 
 export async function loginAction(formData: FormData) {
@@ -68,7 +68,7 @@ export async function loginAction(formData: FormData) {
     redirect(`/?error=${encodeURIComponent(message)}`);
   }
 
-  redirect("/");
+  redirect("/?success=Signed%20in");
 }
 
 export async function signupAction(formData: FormData) {
@@ -106,7 +106,7 @@ export async function signupAction(formData: FormData) {
 export async function logoutAction() {
   const supabase = await createServerSupabaseClient();
   await supabase.auth.signOut();
-  redirect("/");
+  redirect("/?success=Signed%20out");
 }
 
 export async function updateTransactionCategoryAction(formData: FormData) {
@@ -119,7 +119,7 @@ export async function updateTransactionCategoryAction(formData: FormData) {
   try {
     const db = await getMigratedDatabase();
     const transaction = await updateTransactionCategory(db, { transactionId, category });
-    redirectTarget = `/?month=${transaction.transactionDate.slice(0, 7)}`;
+    redirectTarget = `/?month=${transaction.transactionDate.slice(0, 7)}&success=Category%20updated`;
   } catch (error) {
     const message = error instanceof Error ? error.message : "Category update failed";
     redirect(`/?importBatchId=${importBatchId}&error=${encodeURIComponent(message)}`);
@@ -146,7 +146,7 @@ export async function updateTransactionDetailsAction(formData: FormData) {
 
     const db = await getMigratedDatabase();
     const transaction = await updateTransactionDetails(db, { transactionId, description, category, tags });
-    redirectTarget = `/?month=${transaction.transactionDate.slice(0, 7)}`;
+    redirectTarget = `/?month=${transaction.transactionDate.slice(0, 7)}&success=Transaction%20updated`;
   } catch (error) {
     const message = error instanceof Error ? error.message : "Transaction update failed";
     redirect(`/?importBatchId=${importBatchId}&error=${encodeURIComponent(message)}`);
@@ -164,7 +164,7 @@ export async function deleteTransactionAction(formData: FormData) {
   try {
     const db = await getMigratedDatabase();
     const transaction = await deleteTransaction(db, { transactionId });
-    redirectTarget = `/?month=${transaction.transactionDate.slice(0, 7)}`;
+    redirectTarget = `/?month=${transaction.transactionDate.slice(0, 7)}&success=Transaction%20deleted`;
   } catch (error) {
     const message = error instanceof Error ? error.message : "Transaction delete failed";
     redirect(`/?importBatchId=${importBatchId}&error=${encodeURIComponent(message)}`);
@@ -216,7 +216,7 @@ export async function createManualTransactionAction(formData: FormData) {
       category,
       tags
     });
-    redirectTarget = `/?month=${transaction.transactionDate.slice(0, 7)}`;
+    redirectTarget = `/?month=${transaction.transactionDate.slice(0, 7)}&success=Transaction%20added`;
   } catch (error) {
     const message = error instanceof Error ? error.message : "Manual transaction create failed";
     redirect(`/?importBatchId=${importBatchId}&error=${encodeURIComponent(message)}`);
@@ -237,7 +237,7 @@ export async function deleteImportBatchAction(formData: FormData) {
     redirect(`/?importBatchId=${importBatchId}&error=${encodeURIComponent(message)}`);
   }
 
-  redirect("/");
+  redirect("/?success=Import%20deleted");
 }
 
 function moneyToMinorUnits(value: string) {

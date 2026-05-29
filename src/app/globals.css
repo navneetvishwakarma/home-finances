@@ -56,13 +56,94 @@ select {
   padding: 28px;
 }
 
+.app-frame {
+  display: grid;
+  grid-template-columns: 240px minmax(0, 1fr);
+  gap: 18px;
+  max-width: 1500px;
+  margin: 0 auto;
+}
+
+.app-main {
+  min-width: 0;
+}
+
+.side-nav {
+  position: sticky;
+  top: 28px;
+  align-self: start;
+  display: grid;
+  gap: 18px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-panel);
+  padding: 16px;
+  background: var(--surface-glass);
+  box-shadow: var(--shadow-glass);
+  backdrop-filter: blur(var(--blur-glass));
+}
+
+.side-nav-user {
+  display: grid;
+  gap: 4px;
+  min-width: 0;
+}
+
+.side-nav-user span,
+.side-nav-user small {
+  overflow-wrap: anywhere;
+}
+
+.side-nav-user span {
+  color: var(--ink);
+  font-size: 14px;
+  font-weight: 800;
+}
+
+.side-nav-user small {
+  color: var(--muted);
+  font-size: 12px;
+  font-weight: 700;
+}
+
+.side-nav nav,
+.side-nav form {
+  display: grid;
+  gap: 8px;
+}
+
+.side-nav a,
+.side-nav button {
+  display: inline-flex;
+  gap: 10px;
+  align-items: center;
+  width: 100%;
+  border: 1px solid transparent;
+  border-radius: 6px;
+  padding: 10px;
+  color: #323946;
+  background: transparent;
+  font-size: 13px;
+  font-weight: 800;
+  text-align: left;
+  text-decoration: none;
+  cursor: pointer;
+}
+
+.side-nav a:hover,
+.side-nav button:hover,
+.side-nav a.is-active {
+  border-color: rgba(37, 99, 235, 0.28);
+  color: var(--blue);
+  background: #eff6ff;
+}
+
 .app-header {
   display: flex;
   justify-content: space-between;
   gap: 24px;
   align-items: flex-end;
   max-width: 1320px;
-  margin: 0 auto 22px;
+  margin: 0 0 22px;
 }
 
 .header-actions {
@@ -182,7 +263,7 @@ select {
   grid-template-columns: minmax(300px, 380px) minmax(0, 1fr);
   gap: 18px;
   max-width: 1320px;
-  margin: 0 auto;
+  margin: 0;
 }
 
 .import-panel,
@@ -404,6 +485,87 @@ select {
   color: #047857;
   background: var(--green-soft);
   line-height: 1.4;
+}
+
+.toast-stack {
+  display: grid;
+  gap: 8px;
+  margin: 0 0 14px;
+}
+
+.toast {
+  margin: 0;
+  border-radius: 6px;
+  padding: 12px 14px;
+  font-size: 14px;
+  font-weight: 800;
+  line-height: 1.35;
+}
+
+.toast.is-success {
+  border: 1px solid rgba(5, 150, 105, 0.25);
+  color: #047857;
+  background: var(--green-soft);
+}
+
+.toast.is-error {
+  border: 1px solid rgba(194, 65, 12, 0.28);
+  color: var(--coral);
+  background: #fff4ed;
+}
+
+.utility-panel {
+  max-width: 860px;
+}
+
+.utility-panel h2 {
+  margin: 0 0 18px;
+  font-size: 24px;
+}
+
+.metadata-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 12px;
+  margin: 0 0 18px;
+}
+
+.metadata-grid div {
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  padding: 16px;
+  background: var(--panel-strong);
+}
+
+.metadata-grid dt {
+  margin-bottom: 6px;
+  color: var(--muted);
+  font-size: 12px;
+  font-weight: 800;
+}
+
+.metadata-grid dd {
+  margin: 0;
+  color: var(--ink);
+  font-size: 20px;
+  font-weight: 800;
+  overflow-wrap: anywhere;
+}
+
+.metadata-list {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.metadata-list span {
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  padding: 8px 10px;
+  color: #323946;
+  background: rgba(255, 255, 255, 0.72);
+  font-size: 12px;
+  font-weight: 800;
 }
 
 .empty-state {
@@ -927,6 +1089,23 @@ select {
     min-width: 0;
   }
 
+  .app-frame {
+    grid-template-columns: 1fr;
+  }
+
+  .side-nav {
+    position: static;
+  }
+
+  .side-nav nav {
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+  }
+
+  .side-nav a,
+  .side-nav button {
+    justify-content: center;
+  }
+
   .app-header h1 {
     max-width: 340px;
     font-size: 28px;
@@ -964,7 +1143,8 @@ select {
 
   .consolidation-grid,
   .tally-grid,
-  .preview-grid {
+  .preview-grid,
+  .metadata-grid {
     grid-template-columns: 1fr;
   }
 
