@@ -1,4 +1,5 @@
 import { beforeEach, expect, test, vi } from "vitest";
+import { parseImportResults } from "@/modules/imports/import-results";
 
 const redirect = vi.fn((url: string) => {
   throw new Error(`REDIRECT:${url}`);
@@ -191,6 +192,7 @@ test("deactivateAccountAction and reactivateAccountAction toggle account status"
 
 test("importIciciStatement includes skipped duplicate rows in the success redirect", async () => {
   runIciciCsvImport.mockResolvedValueOnce({
+    alreadyImported: true,
     importBatch: {
       skippedRowCount: 3
     },
@@ -210,15 +212,100 @@ test("importIciciStatement includes skipped duplicate rows in the success redire
       })
     )
   ).rejects.toThrow(
-    "REDIRECT:/?month=2026-04&success=Import%20complete%3A%201%20row%20imported%2C%203%20duplicate%20rows%20skipped"
+    "REDIRECT:/?month=2026-04&success=Import%20processed&importResults="
   );
 });
 
-function formData(values: Record<string, string | File>) {
+test("importIciciStatement reports mixed per-file success and errors", async () => {
+  runIciciCsvImport
+    .mockResolvedValueOnce({
+      importBatch: { skippedRowCount: 0 },
+      transactions: [{ transactionDate: "2026-04-30" }, { transactionDate: "2026-04-29" }]
+    })
+    .mockRejectedValueOnce(new Error("Unsupported CSV headers"))
+    .mockResolvedValueOnce({
+      importBatch: { skippedRowCount: 0 },
+      transactions: [{ transactionDate: "2026-05-01" }]
+    });
+  const { importIciciStatement } = await import("@/app/actions");
+
+  const redirectUrl = await redirectedUrl(
+    importIciciStatement(
+      formData({
+        accountDisplayName: "Primary account",
+        statements: [
+          new File(["csv"], "april.csv", { type: "text/csv" }) as any,
+          new File(["bad"], "bad.csv", { type: "text/csv" }) as any,
+          new File(["csv"], "may.csv", { type: "text/csv" }) as any
+        ]
+      })
+    )
+  );
+  const url = new URL(`http://localhost${redirectUrl}`);
+  const results = parseImportResults(url.searchParams.get("importResults") ?? "");
+
+  expect(url.searchParams.get("month")).toBe("2026-05");
+  expect(results).toEqual([
+    { filename: "april.csv", status: "success", month: "2026-04", rowCount: 2 },
+    {
+      filename: "bad.csv",
+      status: "error",
+      error: "This file format is not supported. Supported: ICICI bank CSV, HDFC bank CSV, ICICI credit card CSV."
+    },
+    { filename: "may.csv", status: "success", month: "2026-05", rowCount: 1 }
+  ]);
+});
+
+test("importIciciStatement redirects with all file errors when every file fails", async () => {
+  runIciciCsvImport
+    .mockRejectedValueOnce(new Error("Unsupported CSV headers"))
+    .mockRejectedValueOnce(new Error("File contains no transactions."));
+  const { importIciciStatement } = await import("@/app/actions");
+
+  const redirectUrl = await redirectedUrl(
+    importIciciStatement(
+      formData({
+        accountDisplayName: "Primary account",
+        statements: [
+          new File(["bad"], "bad.csv", { type: "text/csv" }) as any,
+          new File(["empty"], "empty.csv", { type: "text/csv" }) as any
+        ]
+      })
+    )
+  );
+  const url = new URL(`http://localhost${redirectUrl}`);
+  const results = parseImportResults(url.searchParams.get("importResults") ?? "");
+
+  expect(url.searchParams.get("error")).toBe("All files failed. See details.");
+  expect(results.map((result) => result.filename)).toEqual(["bad.csv", "empty.csv"]);
+  expect(results.every((result) => result.status === "error")).toBe(true);
+});
+
+async function redirectedUrl(promise: Promise<unknown>) {
+  try {
+    await promise;
+  } catch (error) {
+    const message = error instanceof Error ? error.message : "";
+    if (message.startsWith("REDIRECT:")) {
+      return message.slice("REDIRECT:".length);
+    }
+    throw error;
+  }
+
+  throw new Error("Expected redirect");
+}
+
+function formData(values: Record<string, string | File | File[]>) {
   const data = new FormData();
 
   for (const [key, value] of Object.entries(values)) {
-    data.set(key, value);
+    if (Array.isArray(value)) {
+      for (const item of value) {
+        data.append(key, item);
+      }
+    } else {
+      data.set(key, value);
+    }
   }
 
   return data;

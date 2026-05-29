@@ -44,19 +44,22 @@ export async function runIciciCsvImport(
     rawCsv: input.rawCsv,
     sourceProfileId: parsed.profileId
   });
+  const alreadyImported = importBatch.alreadyImported;
 
-  await persistParsedTransactions(db, {
-    accountId: account.id,
-    importBatchId: importBatch.id,
-    sourceProfileId: parsed.profileId,
-    rows: parsed.rows
-  });
-  await computeStatementTally(db, {
-    accountId: account.id,
-    importBatchId: importBatch.id
-  });
+  if (!alreadyImported) {
+    await persistParsedTransactions(db, {
+      accountId: account.id,
+      importBatchId: importBatch.id,
+      sourceProfileId: parsed.profileId,
+      rows: parsed.rows
+    });
+    await computeStatementTally(db, {
+      accountId: account.id,
+      importBatchId: importBatch.id
+    });
+  }
 
-  return getImportDashboard(db, importBatch.id, input.ownerUserId);
+  return Object.assign(await getImportDashboard(db, importBatch.id, input.ownerUserId), { alreadyImported });
 }
 
 async function findOrCreateBankAccount(
