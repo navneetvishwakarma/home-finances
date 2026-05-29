@@ -3,26 +3,31 @@ import { getMigratedDatabase } from "@/db/client";
 import { importIciciStatement } from "@/app/actions";
 import { MonthDashboard } from "@/modules/dashboard/DashboardLedger";
 import {
+  getAvailableLedgerMonths,
   getImportDashboard,
   getLatestImportDashboards,
+  getMonthDashboards,
   isCompleteImportDashboard
 } from "@/modules/imports/persistence";
 
 type SearchParams = Promise<{
   importBatchId?: string;
   importBatchIds?: string;
+  month?: string;
   error?: string;
 }>;
 
 export default async function HomePage({ searchParams }: { searchParams: SearchParams }) {
   const params = await searchParams;
-  const loadedDashboards = await loadDashboards(params).catch((error) => {
+  const loadedView = await loadMonthView(params).catch((error) => {
     if (error instanceof Error && error.message.includes("DATABASE_URL")) {
-      return [];
+      return { availableMonths: [], selectedMonth: "", dashboards: [] };
     }
 
     throw error;
   });
+  const { availableMonths, selectedMonth } = loadedView;
+  const loadedDashboards = loadedView.dashboards;
   const dashboards = loadedDashboards.filter(isCompleteImportDashboard);
 
   return (
@@ -89,6 +94,25 @@ export default async function HomePage({ searchParams }: { searchParams: SearchP
         </aside>
 
         <section className="dashboard-panel">
+          <form className="month-view-selector" aria-label="Month view">
+            <label>
+              <span>Month view</span>
+              <select name="month" defaultValue={selectedMonth} disabled={availableMonths.length === 0}>
+                {availableMonths.length > 0 ? (
+                  availableMonths.map((month) => (
+                    <option key={month} value={month}>
+                      {formatMonthLabel(month)}
+                    </option>
+                  ))
+                ) : (
+                  <option value="">No months available</option>
+                )}
+              </select>
+            </label>
+            <button type="submit" disabled={availableMonths.length === 0}>
+              View
+            </button>
+          </form>
           {dashboards.length > 0 ? (
             <MonthDashboard dashboards={dashboards} />
           ) : (
@@ -128,4 +152,32 @@ async function loadDashboards(params: Awaited<SearchParams>) {
   );
 
   return dashboards.filter(isCompleteImportDashboard);
+}
+
+async function loadMonthView(params: Awaited<SearchParams>) {
+  const db = await getMigratedDatabase();
+  const availableMonths = await getAvailableLedgerMonths(db);
+  const selectedMonth =
+    params.month && availableMonths.includes(params.month) ? params.month : availableMonths[0] ?? "";
+
+  if (selectedMonth) {
+    return {
+      availableMonths,
+      selectedMonth,
+      dashboards: await getMonthDashboards(db, selectedMonth)
+    };
+  }
+
+  return {
+    availableMonths,
+    selectedMonth,
+    dashboards: await loadDashboards(params)
+  };
+}
+
+function formatMonthLabel(month: string) {
+  return new Intl.DateTimeFormat("en-US", {
+    month: "long",
+    year: "numeric"
+  }).format(new Date(`${month}-01T00:00:00`));
 }

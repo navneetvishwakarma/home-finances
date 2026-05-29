@@ -9,6 +9,8 @@ vi.mock("@/db/client", () => ({
 vi.mock("@/modules/imports/persistence", () => ({
   getImportDashboard: vi.fn(),
   getLatestImportDashboards: vi.fn(async () => []),
+  getAvailableLedgerMonths: vi.fn(async () => []),
+  getMonthDashboards: vi.fn(async () => []),
   isCompleteImportDashboard: vi.fn((dashboard) => Boolean(dashboard.importBatch && dashboard.tally))
 }));
 
@@ -26,6 +28,7 @@ test("renders the MVP 1 upload entry point", async () => {
   expect(html).toContain('name="statements"');
   expect(html).toContain("multiple");
   expect(html).toContain("Complete month view");
+  expect(html).toContain("Month view");
   expect(html).toContain("Credit card coverage");
   expect(html).toContain("Supported sources");
   expect(html).toContain("Account name");

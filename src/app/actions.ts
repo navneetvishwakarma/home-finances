@@ -26,7 +26,7 @@ export async function importIciciStatement(formData: FormData) {
     redirect("/?error=Choose%20at%20least%20one%20supported%20statement%20before%20running%20the%20import");
   }
 
-  const importBatchIds: string[] = [];
+  const importedMonths = new Set<string>();
 
   try {
     const db = await getMigratedDatabase();
@@ -36,30 +36,35 @@ export async function importIciciStatement(formData: FormData) {
         filename: statement.name,
         rawCsv: await statement.text()
       });
-      importBatchIds.push(dashboard.importBatch.id);
+      for (const transaction of dashboard.transactions) {
+        importedMonths.add(transaction.transactionDate.slice(0, 7));
+      }
     }
   } catch (error) {
     const message = error instanceof Error ? error.message : "Import failed";
     redirect(`/?error=${encodeURIComponent(message)}`);
   }
 
-  redirect(`/?importBatchIds=${importBatchIds.join(",")}`);
+  const latestImportedMonth = [...importedMonths].sort((left, right) => right.localeCompare(left))[0];
+  redirect(latestImportedMonth ? `/?month=${latestImportedMonth}` : "/");
 }
 
 export async function updateTransactionCategoryAction(formData: FormData) {
   const transactionId = String(formData.get("transactionId") || "");
   const importBatchId = String(formData.get("importBatchId") || "");
   const category = String(formData.get("category") || "");
+  let redirectTarget = importBatchId ? `/?importBatchId=${importBatchId}` : "/";
 
   try {
     const db = await getMigratedDatabase();
-    await updateTransactionCategory(db, { transactionId, category });
+    const transaction = await updateTransactionCategory(db, { transactionId, category });
+    redirectTarget = `/?month=${transaction.transactionDate.slice(0, 7)}`;
   } catch (error) {
     const message = error instanceof Error ? error.message : "Category update failed";
     redirect(`/?importBatchId=${importBatchId}&error=${encodeURIComponent(message)}`);
   }
 
-  redirect(`/?importBatchId=${importBatchId}`);
+  redirect(redirectTarget);
 }
 
 export async function updateTransactionDetailsAction(formData: FormData) {
@@ -70,6 +75,7 @@ export async function updateTransactionDetailsAction(formData: FormData) {
   const tags = String(formData.get("tags") || "")
     .split(",")
     .map((tag) => tag.trim());
+  let redirectTarget = importBatchId ? `/?importBatchId=${importBatchId}` : "/";
 
   try {
     if (!description) {
@@ -77,28 +83,31 @@ export async function updateTransactionDetailsAction(formData: FormData) {
     }
 
     const db = await getMigratedDatabase();
-    await updateTransactionDetails(db, { transactionId, description, category, tags });
+    const transaction = await updateTransactionDetails(db, { transactionId, description, category, tags });
+    redirectTarget = `/?month=${transaction.transactionDate.slice(0, 7)}`;
   } catch (error) {
     const message = error instanceof Error ? error.message : "Transaction update failed";
     redirect(`/?importBatchId=${importBatchId}&error=${encodeURIComponent(message)}`);
   }
 
-  redirect(`/?importBatchId=${importBatchId}`);
+  redirect(redirectTarget);
 }
 
 export async function deleteTransactionAction(formData: FormData) {
   const transactionId = String(formData.get("transactionId") || "");
   const importBatchId = String(formData.get("importBatchId") || "");
+  let redirectTarget = importBatchId ? `/?importBatchId=${importBatchId}` : "/";
 
   try {
     const db = await getMigratedDatabase();
-    await deleteTransaction(db, { transactionId });
+    const transaction = await deleteTransaction(db, { transactionId });
+    redirectTarget = `/?month=${transaction.transactionDate.slice(0, 7)}`;
   } catch (error) {
     const message = error instanceof Error ? error.message : "Transaction delete failed";
     redirect(`/?importBatchId=${importBatchId}&error=${encodeURIComponent(message)}`);
   }
 
-  redirect(importBatchId ? `/?importBatchId=${importBatchId}` : "/");
+  redirect(redirectTarget);
 }
 
 export async function createManualTransactionAction(formData: FormData) {
@@ -112,6 +121,7 @@ export async function createManualTransactionAction(formData: FormData) {
   const tags = String(formData.get("tags") || "")
     .split(",")
     .map((tag) => tag.trim());
+  let redirectTarget = importBatchId ? `/?importBatchId=${importBatchId}` : "/";
 
   try {
     if (!accountId) {
@@ -133,7 +143,7 @@ export async function createManualTransactionAction(formData: FormData) {
     }
 
     const db = await getMigratedDatabase();
-    await createManualTransaction(db, {
+    const transaction = await createManualTransaction(db, {
       accountId,
       transactionDate,
       description,
@@ -142,12 +152,13 @@ export async function createManualTransactionAction(formData: FormData) {
       category,
       tags
     });
+    redirectTarget = `/?month=${transaction.transactionDate.slice(0, 7)}`;
   } catch (error) {
     const message = error instanceof Error ? error.message : "Manual transaction create failed";
     redirect(`/?importBatchId=${importBatchId}&error=${encodeURIComponent(message)}`);
   }
 
-  redirect(importBatchId ? `/?importBatchId=${importBatchId}` : "/");
+  redirect(redirectTarget);
 }
 
 export async function deleteImportBatchAction(formData: FormData) {

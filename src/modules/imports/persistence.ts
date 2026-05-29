@@ -1,5 +1,5 @@
 import { createHash, randomUUID } from "node:crypto";
-import { desc, eq, sql } from "drizzle-orm";
+import { and, desc, eq, gte, lt, sql } from "drizzle-orm";
 import type { PostgresJsDatabase } from "drizzle-orm/postgres-js";
 import { accounts, importBatches, statementTallies, transactions } from "@/db/schema";
 import {
@@ -132,6 +132,7 @@ export async function persistParsedTransactions(
   input: {
     accountId: string;
     importBatchId: string;
+    sourceProfileId?: string;
     rows: CanonicalParsedRow[];
   }
 ) {
@@ -161,6 +162,7 @@ export async function persistParsedTransactions(
         runningBalanceMinorUnits: moneyToMinorUnits(row.balance),
         category: classification.category,
         categorySource: classification.categorySource,
+        sourceFingerprint: sourceFingerprint(input.sourceProfileId, rowHash),
         rowHash,
         rawSourcePayload: row.rawRow,
         tags: []
@@ -172,7 +174,7 @@ export async function persistParsedTransactions(
     .insert(transactions)
     .values(values)
     .onConflictDoUpdate({
-      target: [transactions.importBatchId, transactions.rowHash],
+      target: [transactions.accountId, transactions.sourceFingerprint],
       set: {
         deletedAt: null,
         transactionDate: sql`excluded.transaction_date`,
@@ -287,6 +289,7 @@ export async function createManualTransaction(
       runningBalanceMinorUnits: 0,
       category: input.category,
       categorySource: "manual",
+      sourceFingerprint: `manual:${id}`,
       rowHash: `manual:${id}`,
       rawSourcePayload: { source: "manual" },
       tags: normalizeTags(input.tags)
@@ -473,6 +476,77 @@ export async function getLatestImportDashboards(db: Db, limit = 12) {
   return dashboards.filter(isCompleteImportDashboard);
 }
 
+export async function getAvailableLedgerMonths(db: Db) {
+  const ledgerRows = await db
+    .select({ transactionDate: transactions.transactionDate })
+    .from(transactions)
+    .where(sql`${transactions.deletedAt} IS NULL`);
+
+  return Array.from(new Set(ledgerRows.map((row) => row.transactionDate.slice(0, 7)))).sort(
+    (left, right) => right.localeCompare(left)
+  );
+}
+
+export async function getMonthDashboards(db: Db, month: string) {
+  if (!/^\d{4}-\d{2}$/.test(month)) {
+    return [];
+  }
+
+  const startDate = `${month}-01`;
+  const endDate = nextMonthStart(month);
+  const ledgerRows = await db
+    .select()
+    .from(transactions)
+    .where(
+      and(
+        gte(transactions.transactionDate, startDate),
+        lt(transactions.transactionDate, endDate),
+        sql`${transactions.deletedAt} IS NULL`
+      )
+    );
+  const importBatchIds = Array.from(
+    new Set(
+      ledgerRows
+        .map((transaction) => transaction.importBatchId)
+        .filter((importBatchId): importBatchId is string => Boolean(importBatchId))
+    )
+  );
+
+  if (importBatchIds.length === 0) {
+    return buildManualMonthDashboards(ledgerRows, month);
+  }
+
+  const importedDashboards = await Promise.all(
+    importBatchIds.map(async (importBatchId) => {
+      const [importBatch] = await db
+        .select()
+        .from(importBatches)
+        .where(eq(importBatches.id, importBatchId));
+      if (!importBatch || importBatch.status === "deleted") {
+        return null;
+      }
+      const batchTransactions = ledgerRows
+        .filter((transaction) => transaction.importBatchId === importBatchId)
+        .sort(
+          (left, right) =>
+            left.transactionDate.localeCompare(right.transactionDate) ||
+            sourceRowNumber(left.rawSourcePayload) - sourceRowNumber(right.rawSourcePayload)
+        );
+
+      return {
+        importBatch: { ...importBatch, status: "imported" },
+        tally: buildMonthTally(batchTransactions, importBatch.accountId),
+        transactions: batchTransactions
+      };
+    })
+  );
+
+  return [
+    ...importedDashboards.filter((dashboard) => dashboard !== null),
+    ...buildManualMonthDashboards(ledgerRows, month)
+  ];
+}
+
 export type ImportDashboard = Awaited<ReturnType<typeof getImportDashboard>>;
 export type CompleteImportDashboard = ImportDashboard & {
   importBatch: NonNullable<ImportDashboard["importBatch"]>;
@@ -488,6 +562,104 @@ export function isCompleteImportDashboard(
 function sourceRowId(rawRow: Record<string, string>, rowHash: string) {
   const sourceNumber = rawRow["S No."] || rawRow["Sr.No."] || rawRow["Source Row Number"];
   return sourceNumber ? `${sourceNumber}:${rowHash}` : rowHash;
+}
+
+function sourceFingerprint(sourceProfileId = "unknown-source-profile", rowHash: string) {
+  return `${sourceProfileId}:${rowHash}`;
+}
+
+function nextMonthStart(month: string) {
+  const [year, monthNumber] = month.split("-").map(Number);
+  const nextMonth = monthNumber === 12 ? 1 : monthNumber + 1;
+  const nextYear = monthNumber === 12 ? year + 1 : year;
+  return `${nextYear}-${String(nextMonth).padStart(2, "0")}-01`;
+}
+
+function buildMonthTally(
+  ledgerRows: Awaited<ReturnType<typeof getImportDashboard>>["transactions"],
+  accountId: string
+) {
+  const orderedRows = ledgerRows.sort(
+    (left, right) =>
+      left.transactionDate.localeCompare(right.transactionDate) ||
+      sourceRowNumber(left.rawSourcePayload) - sourceRowNumber(right.rawSourcePayload)
+  );
+  const totalIncomingMinorUnits = orderedRows
+    .filter((row) => row.direction === "incoming")
+    .reduce((total, row) => total + row.amountMinorUnits, 0);
+  const totalOutgoingMinorUnits = orderedRows
+    .filter((row) => row.direction === "outgoing")
+    .reduce((total, row) => total + row.amountMinorUnits, 0);
+  const netMovementMinorUnits = totalIncomingMinorUnits - totalOutgoingMinorUnits;
+  const firstRow = orderedRows[0];
+  const lastRow = orderedRows[orderedRows.length - 1];
+  const firstSignedMovement = firstRow
+    ? firstRow.direction === "incoming"
+      ? firstRow.amountMinorUnits
+      : -firstRow.amountMinorUnits
+    : 0;
+  const openingBalanceMinorUnits = firstRow
+    ? firstRow.runningBalanceMinorUnits - firstSignedMovement
+    : 0;
+  const closingBalanceMinorUnits = lastRow?.runningBalanceMinorUnits ?? openingBalanceMinorUnits;
+  const calculatedClosingBalanceMinorUnits = openingBalanceMinorUnits + netMovementMinorUnits;
+
+  return {
+    id: `month-tally:${accountId}:${orderedRows[0]?.importBatchId ?? "none"}`,
+    accountId,
+    importBatchId: orderedRows[0]?.importBatchId ?? "",
+    totalIncomingMinorUnits,
+    totalOutgoingMinorUnits,
+    netMovementMinorUnits,
+    openingBalanceMinorUnits,
+    closingBalanceMinorUnits,
+    calculatedClosingBalanceMinorUnits,
+    differenceMinorUnits: closingBalanceMinorUnits - calculatedClosingBalanceMinorUnits,
+    createdAt: new Date()
+  };
+}
+
+function buildManualMonthDashboards(
+  ledgerRows: Awaited<ReturnType<typeof getImportDashboard>>["transactions"],
+  month: string
+) {
+  const manualRowsByAccount = new Map<string, typeof ledgerRows>();
+
+  for (const transaction of ledgerRows) {
+    if (transaction.importBatchId !== null || transaction.sourceType !== "manual") {
+      continue;
+    }
+
+    manualRowsByAccount.set(transaction.accountId, [
+      ...(manualRowsByAccount.get(transaction.accountId) ?? []),
+      transaction
+    ]);
+  }
+
+  return [...manualRowsByAccount.entries()].map(([accountId, accountRows]) => {
+    const syntheticImportBatchId = `manual:${accountId}:${month}`;
+
+    return {
+      importBatch: {
+        id: syntheticImportBatchId,
+        accountId,
+        sourceProfileId: "manual-transactions",
+        filename: "Manual transactions",
+        fileFingerprint: syntheticImportBatchId,
+        rawSource: "manual",
+        status: "imported",
+        importedAt: new Date()
+      },
+      tally: {
+        ...buildMonthTally(accountRows, accountId),
+        id: `month-tally:${syntheticImportBatchId}`,
+        importBatchId: syntheticImportBatchId
+      },
+      transactions: accountRows.sort((left, right) =>
+        left.transactionDate.localeCompare(right.transactionDate)
+      )
+    };
+  });
 }
 
 function normalizeTags(tags: string[]) {

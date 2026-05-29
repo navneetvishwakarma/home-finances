@@ -116,6 +116,49 @@ select {
   padding: 22px;
 }
 
+.month-view-selector {
+  display: flex;
+  justify-content: flex-end;
+  gap: 10px;
+  align-items: flex-end;
+  margin: 0 0 18px;
+}
+
+.month-view-selector label {
+  display: grid;
+  gap: 6px;
+  min-width: 180px;
+}
+
+.month-view-selector span {
+  color: #2c3442;
+  font-size: 13px;
+  font-weight: 800;
+}
+
+.month-view-selector select,
+.month-view-selector button {
+  min-height: 42px;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  padding: 8px 10px;
+  background: #ffffff;
+}
+
+.month-view-selector button {
+  color: #ffffff;
+  background: var(--blue);
+  font-weight: 800;
+  cursor: pointer;
+}
+
+.month-view-selector button:disabled,
+.month-view-selector select:disabled {
+  color: var(--muted);
+  background: #f3f5f8;
+  cursor: not-allowed;
+}
+
 .panel-heading {
   margin-bottom: 22px;
 }
@@ -804,10 +847,15 @@ select {
   }
 
   .ledger-actions,
-  .manual-transaction-form {
+  .manual-transaction-form,
+  .month-view-selector {
     grid-template-columns: 1fr;
     justify-content: stretch;
     width: 100%;
+  }
+
+  .month-view-selector {
+    display: grid;
   }
 
   .add-transaction-trigger {
