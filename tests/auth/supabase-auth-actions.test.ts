@@ -40,12 +40,20 @@ test("loginAction signs in with Supabase Auth", async () => {
 
   await expect(
     loginAction(formData({ email: "USER@example.com", password: "correct horse battery staple" }))
-  ).rejects.toThrow("REDIRECT:/");
+  ).rejects.toThrow("REDIRECT:/?success=Signed%20in");
 
   expect(signInWithPassword).toHaveBeenCalledWith({
     email: "user@example.com",
     password: "correct horse battery staple"
   });
+});
+
+test("logoutAction signs out with Supabase Auth and redirects with success", async () => {
+  signOut.mockResolvedValueOnce({ error: null });
+  const { logoutAction } = await import("@/app/actions");
+
+  await expect(logoutAction()).rejects.toThrow("REDIRECT:/?success=Signed%20out");
+  expect(signOut).toHaveBeenCalled();
 });
 
 test("signupAction creates the first-time Supabase Auth user", async () => {
