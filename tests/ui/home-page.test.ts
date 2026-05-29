@@ -69,6 +69,7 @@ test("renders the MVP 1 upload entry point for authenticated users", async () =>
   expect(html).toContain("Supported sources");
   expect(html).toContain("Account name");
   expect(html).toContain(".csv,text/csv,.txt,text/plain");
+  expect(html).toContain("Import in progress");
   expect(html).toContain("Run import");
   expect(html).toContain("Month cockpit");
 });

@@ -3,9 +3,13 @@ import { bigint, boolean, date, integer, jsonb, pgTable, text, timestamp, unique
 export const accounts = pgTable("accounts", {
   id: uuid("id").primaryKey(),
   accountType: text("account_type").notNull().default("bank"),
+  ownerUserId: text("owner_user_id").notNull().default("legacy-local-user"),
   displayName: text("display_name").notNull(),
   providerLabel: text("provider_label").notNull(),
   currency: text("currency").notNull(),
+  statementHolderName: text("statement_holder_name"),
+  institutionName: text("institution_name"),
+  linkedAccountRef: text("linked_account_ref"),
   active: boolean("active").notNull().default(true),
   createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow()
 });

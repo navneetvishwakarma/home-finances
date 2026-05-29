@@ -26,6 +26,24 @@ export const iciciBankCsvProfile = {
   detect(headers: string[]) {
     return ICICI_HEADERS.every((header) => headers.includes(header));
   },
+  metadata(rawCsv: string) {
+    const records = parseCsvRecords(rawCsv);
+    const accountLine = records.find((record) => record.some((value) => value.trim() === "Account Number"));
+    const accountCell = accountLine?.find((value) => /\d+\s*\(\s*INR\s*\)/.test(value)) ?? "";
+    const match = accountCell.match(/(\d+)\s*\(\s*INR\s*\)\s*-\s*(.+)$/);
+
+    if (!match) {
+      return {
+        institutionName: "ICICI Bank"
+      };
+    }
+
+    return {
+      accountHolderName: match[2].trim(),
+      institutionName: "ICICI Bank",
+      linkedAccountRef: obfuscateAccountRef(match[1])
+    };
+  },
   parse(rawCsv: string, headerIndex: number): CanonicalParsedRow[] {
     const records = parseCsvRecords(rawCsv);
     const headers = records[headerIndex];
@@ -61,4 +79,9 @@ function isTransactionRecord(record: string[], headers: string[]) {
 function parseIciciDate(value: string) {
   const [day, month, year] = value.split("/");
   return `${year}-${month}-${day}`;
+}
+
+function obfuscateAccountRef(value: string) {
+  const visibleDigits = value.slice(-5);
+  return `${"X".repeat(Math.max(value.length - visibleDigits.length, 0))}${visibleDigits}`;
 }

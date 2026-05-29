@@ -1,5 +1,6 @@
 import { createHash, randomUUID } from "node:crypto";
 import { and, desc, eq, gte, lt, sql } from "drizzle-orm";
+import type { AnyColumn } from "drizzle-orm";
 import type { PostgresJsDatabase } from "drizzle-orm/postgres-js";
 import { accounts, importBatches, statementTallies, transactions } from "@/db/schema";
 import {
@@ -17,9 +18,13 @@ type Db = PostgresJsDatabase<Record<string, unknown>>;
 export async function createAccount(
   db: Db,
   input: {
+    ownerUserId?: string;
     displayName: string;
     providerLabel: string;
     currency: string;
+    statementHolderName?: string;
+    institutionName?: string;
+    linkedAccountRef?: string;
   }
 ) {
   const [account] = await db
@@ -27,9 +32,13 @@ export async function createAccount(
     .values({
       id: randomUUID(),
       accountType: "bank",
+      ownerUserId: input.ownerUserId ?? "legacy-local-user",
       displayName: input.displayName,
       providerLabel: input.providerLabel,
       currency: input.currency,
+      statementHolderName: input.statementHolderName,
+      institutionName: input.institutionName,
+      linkedAccountRef: input.linkedAccountRef,
       active: true
     })
     .returning();
@@ -193,6 +202,7 @@ export async function updateTransactionCategory(
   input: {
     transactionId: string;
     category: TransactionCategory | string;
+    ownerUserId?: string;
   }
 ) {
   if (!isTransactionCategory(input.category)) {
@@ -205,7 +215,7 @@ export async function updateTransactionCategory(
       category: input.category,
       categorySource: "manual"
     })
-    .where(eq(transactions.id, input.transactionId))
+    .where(and(eq(transactions.id, input.transactionId), accountOwnerCondition(transactions.accountId, input.ownerUserId)))
     .returning();
 
   if (!transaction) {
@@ -227,6 +237,7 @@ export async function updateTransactionDetails(
     description: string;
     category: TransactionCategory | string;
     tags: string[];
+    ownerUserId?: string;
   }
 ) {
   if (!isTransactionCategory(input.category)) {
@@ -241,7 +252,7 @@ export async function updateTransactionDetails(
       categorySource: "manual",
       tags: normalizeTags(input.tags)
     })
-    .where(eq(transactions.id, input.transactionId))
+    .where(and(eq(transactions.id, input.transactionId), accountOwnerCondition(transactions.accountId, input.ownerUserId)))
     .returning();
 
   if (!transaction) {
@@ -266,6 +277,7 @@ export async function createManualTransaction(
     amountMinorUnits: number;
     category: TransactionCategory | string;
     tags: string[];
+    ownerUserId?: string;
   }
 ) {
   if (!isTransactionCategory(input.category)) {
@@ -273,6 +285,10 @@ export async function createManualTransaction(
   }
 
   const id = randomUUID();
+  if (input.ownerUserId) {
+    await requireOwnedAccount(db, input.accountId, input.ownerUserId);
+  }
+
   const [transaction] = await db
     .insert(transactions)
     .values({
@@ -303,12 +319,13 @@ export async function deleteTransaction(
   db: Db,
   input: {
     transactionId: string;
+    ownerUserId?: string;
   }
 ) {
   const [transaction] = await db
     .update(transactions)
     .set({ deletedAt: new Date() })
-    .where(eq(transactions.id, input.transactionId))
+    .where(and(eq(transactions.id, input.transactionId), accountOwnerCondition(transactions.accountId, input.ownerUserId)))
     .returning();
 
   if (!transaction) {
@@ -322,12 +339,13 @@ export async function deleteImportBatch(
   db: Db,
   input: {
     importBatchId: string;
+    ownerUserId?: string;
   }
 ) {
   const [importBatch] = await db
     .update(importBatches)
     .set({ status: "deleted" })
-    .where(eq(importBatches.id, input.importBatchId))
+    .where(and(eq(importBatches.id, input.importBatchId), accountOwnerCondition(importBatches.accountId, input.ownerUserId)))
     .returning();
 
   if (!importBatch) {
@@ -436,20 +454,28 @@ function sourceRowNumber(rawSourcePayload: unknown) {
   return 0;
 }
 
-export async function getImportDashboard(db: Db, importBatchId: string) {
+export async function getImportDashboard(db: Db, importBatchId: string, ownerUserId?: string) {
   const [importBatch] = await db
     .select()
     .from(importBatches)
-    .where(eq(importBatches.id, importBatchId));
+    .where(and(eq(importBatches.id, importBatchId), accountOwnerCondition(importBatches.accountId, ownerUserId)));
   const [tally] = await db
     .select()
     .from(statementTallies)
-    .where(eq(statementTallies.importBatchId, importBatchId));
+    .where(
+      and(
+        eq(statementTallies.importBatchId, importBatchId),
+        accountOwnerCondition(statementTallies.accountId, ownerUserId)
+      )
+    );
   const ledgerRows = await db
     .select()
     .from(transactions)
     .where(
-      sql`${transactions.importBatchId} = ${importBatchId} AND ${transactions.deletedAt} IS NULL`
+      and(
+        sql`${transactions.importBatchId} = ${importBatchId} AND ${transactions.deletedAt} IS NULL`,
+        accountOwnerCondition(transactions.accountId, ownerUserId)
+      )
     );
 
   return {
@@ -461,38 +487,41 @@ export async function getImportDashboard(db: Db, importBatchId: string) {
   };
 }
 
-export async function getLatestImportDashboards(db: Db, limit = 12) {
+export async function getLatestImportDashboards(db: Db, limit = 12, ownerUserId?: string) {
   const latestImportBatches = await db
     .select({ id: importBatches.id })
     .from(importBatches)
-    .where(eq(importBatches.status, "imported"))
+    .where(and(eq(importBatches.status, "imported"), accountOwnerCondition(importBatches.accountId, ownerUserId)))
     .orderBy(desc(importBatches.importedAt))
     .limit(limit);
 
   const dashboards = await Promise.all(
-    latestImportBatches.map((importBatch) => getImportDashboard(db, importBatch.id))
+    latestImportBatches.map((importBatch) => getImportDashboard(db, importBatch.id, ownerUserId))
   );
 
   return dashboards.filter(isCompleteImportDashboard);
 }
 
-export async function getAvailableLedgerMonths(db: Db) {
+export async function getAvailableLedgerMonths(db: Db, ownerUserId?: string) {
   const ledgerRows = await db
     .select({ transactionDate: transactions.transactionDate })
     .from(transactions)
-    .where(sql`${transactions.deletedAt} IS NULL`);
+    .where(and(sql`${transactions.deletedAt} IS NULL`, accountOwnerCondition(transactions.accountId, ownerUserId)));
 
   return Array.from(new Set(ledgerRows.map((row) => row.transactionDate.slice(0, 7)))).sort(
     (left, right) => right.localeCompare(left)
   );
 }
 
-export async function getAccountMetadataSummary(db: Db) {
-  const [accountCountRow] = await db.select({ count: sql<number>`count(*)::int` }).from(accounts);
+export async function getAccountMetadataSummary(db: Db, ownerUserId?: string) {
+  const [accountCountRow] = await db
+    .select({ count: sql<number>`count(*)::int` })
+    .from(accounts)
+    .where(accountOwnerCondition(accounts.id, ownerUserId));
   const profileRows = await db
     .select({ sourceProfileId: importBatches.sourceProfileId })
     .from(importBatches)
-    .where(sql`${importBatches.status} <> 'deleted'`);
+    .where(and(sql`${importBatches.status} <> 'deleted'`, accountOwnerCondition(importBatches.accountId, ownerUserId)));
 
   return {
     accountCount: accountCountRow?.count ?? 0,
@@ -500,7 +529,7 @@ export async function getAccountMetadataSummary(db: Db) {
   };
 }
 
-export async function getMonthDashboards(db: Db, month: string) {
+export async function getMonthDashboards(db: Db, month: string, ownerUserId?: string) {
   if (!/^\d{4}-\d{2}$/.test(month)) {
     return [];
   }
@@ -514,7 +543,8 @@ export async function getMonthDashboards(db: Db, month: string) {
       and(
         gte(transactions.transactionDate, startDate),
         lt(transactions.transactionDate, endDate),
-        sql`${transactions.deletedAt} IS NULL`
+        sql`${transactions.deletedAt} IS NULL`,
+        accountOwnerCondition(transactions.accountId, ownerUserId)
       )
     );
   const importBatchIds = Array.from(
@@ -677,4 +707,24 @@ function buildManualMonthDashboards(
 
 function normalizeTags(tags: string[]) {
   return Array.from(new Set(tags.map((tag) => tag.trim()).filter((tag) => tag.length > 0)));
+}
+
+function accountOwnerCondition(accountId: AnyColumn, ownerUserId?: string) {
+  if (!ownerUserId) {
+    return sql`true`;
+  }
+
+  return sql`${accountId} IN (SELECT ${accounts.id} FROM ${accounts} WHERE ${accounts.ownerUserId} = ${ownerUserId})`;
+}
+
+async function requireOwnedAccount(db: Db, accountId: string, ownerUserId: string) {
+  const [account] = await db
+    .select({ id: accounts.id })
+    .from(accounts)
+    .where(and(eq(accounts.id, accountId), eq(accounts.ownerUserId, ownerUserId)))
+    .limit(1);
+
+  if (!account) {
+    throw new Error("Account not found");
+  }
 }
