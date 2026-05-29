@@ -18,6 +18,8 @@ import {
   createManualTransaction,
   deleteTransaction,
   deleteImportBatch,
+  getAvailableLedgerMonths,
+  getMonthDashboards,
   uploadIciciCsvForAccount
 } from "@/modules/imports/persistence";
 import { DashboardLedger } from "@/modules/dashboard/DashboardLedger";
@@ -543,5 +545,145 @@ test("runs the full import flow idempotently when the same statement is re-impor
   expect(secondDashboard.importBatch.id).toBe(firstDashboard.importBatch.id);
   expect(secondDashboard.transactions).toHaveLength(firstDashboard.transactions.length);
   expect(accountTransactions).toHaveLength(firstDashboard.transactions.length);
+});
+
+test("deduplicates source transactions across different import batches in a month view", async () => {
+  const account = await createAccount(db, {
+    displayName: "Source Transaction Idempotency Test",
+    providerLabel: "ICICI Bank",
+    currency: "INR"
+  });
+  const firstImportBatch = await createImportBatch(db, {
+    accountId: account.id,
+    sourceProfileId: "icici-bank-csv",
+    filename: "part-one.csv",
+    fileFingerprint: "sha256:part-one",
+    rawSource: "csv-content-one",
+    status: "uploaded"
+  });
+  const secondImportBatch = await createImportBatch(db, {
+    accountId: account.id,
+    sourceProfileId: "icici-bank-csv",
+    filename: "part-two.csv",
+    fileFingerprint: "sha256:part-two",
+    rawSource: "csv-content-two",
+    status: "uploaded"
+  });
+  const row = {
+    valueDate: "2026-04-01",
+    transactionDate: "2026-04-01",
+    description: "UPI GROCERY STORE",
+    withdrawalAmount: "1200.00",
+    depositAmount: "0.00",
+    balance: "10000.00",
+    rawRow: {
+      "S No.": "1",
+      "Transaction Remarks": "UPI GROCERY STORE",
+      "Withdrawal Amount(INR)": "1200.00",
+      "Deposit Amount(INR)": "0.00"
+    }
+  };
+
+  const [firstTransaction] = await persistParsedTransactions(db, {
+    accountId: account.id,
+    importBatchId: firstImportBatch.id,
+    rows: [row]
+  });
+  const [secondTransaction] = await persistParsedTransactions(db, {
+    accountId: account.id,
+    importBatchId: secondImportBatch.id,
+    rows: [row]
+  });
+
+  expect(secondTransaction.id).toBe(firstTransaction.id);
+
+  const monthDashboards = await getMonthDashboards(db, "2026-04");
+  const matchingTransactions = monthDashboards.flatMap((dashboard) =>
+    dashboard.transactions.filter((transaction) =>
+      [firstTransaction.id, secondTransaction.id].includes(transaction.id)
+    )
+  );
+
+  expect(matchingTransactions).toHaveLength(1);
+  expect(matchingTransactions[0]).toMatchObject({
+    id: firstTransaction.id,
+    importBatchId: firstImportBatch.id,
+    sourceType: "imported"
+  });
+});
+
+test("lists ledger months from active transaction dates with latest month first", async () => {
+  const account = await createAccount(db, {
+    displayName: "Available Month Test",
+    providerLabel: "ICICI Bank",
+    currency: "INR"
+  });
+  const importBatch = await createImportBatch(db, {
+    accountId: account.id,
+    sourceProfileId: "icici-bank-csv",
+    filename: "multi-month.csv",
+    fileFingerprint: "sha256:multi-month",
+    rawSource: "csv-content",
+    status: "uploaded"
+  });
+  await persistParsedTransactions(db, {
+    accountId: account.id,
+    importBatchId: importBatch.id,
+    rows: [
+      {
+        valueDate: "2026-03-31",
+        transactionDate: "2026-03-31",
+        description: "MARCH ROW",
+        withdrawalAmount: "0.00",
+        depositAmount: "100.00",
+        balance: "100.00",
+        rawRow: { "S No.": "1", "Transaction Remarks": "MARCH ROW" }
+      },
+      {
+        valueDate: "2026-04-01",
+        transactionDate: "2026-04-01",
+        description: "APRIL ROW",
+        withdrawalAmount: "0.00",
+        depositAmount: "100.00",
+        balance: "200.00",
+        rawRow: { "S No.": "2", "Transaction Remarks": "APRIL ROW" }
+      }
+    ]
+  });
+
+  const months = await getAvailableLedgerMonths(db);
+
+  expect(months.slice(0, 2)).toEqual(["2026-04", "2026-03"]);
+});
+
+test("includes manual transactions in the selected month view", async () => {
+  const account = await createAccount(db, {
+    displayName: "Manual Month View Test",
+    providerLabel: "Manual",
+    currency: "INR"
+  });
+  const manualTransaction = await createManualTransaction(db, {
+    accountId: account.id,
+    transactionDate: "2026-05-10",
+    description: "Cash groceries for month view",
+    direction: "outgoing",
+    amountMinorUnits: 180000,
+    category: "food",
+    tags: ["cash"]
+  });
+
+  const monthDashboards = await getMonthDashboards(db, "2026-05");
+  const matchingTransactions = monthDashboards.flatMap((dashboard) =>
+    dashboard.transactions.filter((transaction) => transaction.id === manualTransaction.id)
+  );
+
+  expect(matchingTransactions).toHaveLength(1);
+  expect(matchingTransactions[0]).toMatchObject({
+    importBatchId: null,
+    sourceType: "manual"
+  });
+  expect(monthDashboards.some((dashboard) => dashboard.importBatch.filename === "Manual transactions")).toBe(
+    true
+  );
 });
 });

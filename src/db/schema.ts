@@ -62,6 +62,7 @@ export const transactions = pgTable(
     runningBalanceMinorUnits: bigint("running_balance_minor_units", { mode: "number" }).notNull(),
     category: text("category").notNull().default("uncategorized"),
     categorySource: text("category_source").notNull().default("uncategorized"),
+    sourceFingerprint: text("source_fingerprint").notNull(),
     rowHash: text("row_hash").notNull(),
     rawSourcePayload: jsonb("raw_source_payload").notNull(),
     tags: jsonb("tags").notNull().default([]),
@@ -69,6 +70,10 @@ export const transactions = pgTable(
     createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow()
   },
   (table) => ({
+    accountSourceFingerprintUnique: unique("transactions_account_source_fingerprint_unique").on(
+      table.accountId,
+      table.sourceFingerprint
+    ),
     importBatchRowHashUnique: unique("transactions_import_batch_row_hash_unique").on(
       table.importBatchId,
       table.rowHash

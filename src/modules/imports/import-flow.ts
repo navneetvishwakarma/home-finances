@@ -34,6 +34,7 @@ export async function runIciciCsvImport(
   await persistParsedTransactions(db, {
     accountId: account.id,
     importBatchId: importBatch.id,
+    sourceProfileId: parsed.profileId,
     rows: parsed.rows
   });
   await computeStatementTally(db, {

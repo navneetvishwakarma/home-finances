@@ -99,6 +99,7 @@ export function DashboardLedger({ data }: { data: DashboardData }) {
   const confidenceLabel =
     data.tally.differenceMinorUnits === 0 ? "Confidence: exact match" : "Confidence: review needed";
   const categoryTotals = summarizeCategories(data.transactions);
+  const isManualDashboard = data.importBatch.sourceProfileId === "manual-transactions";
 
   return (
     <section className="dashboard-ledger">
@@ -114,23 +115,25 @@ export function DashboardLedger({ data }: { data: DashboardData }) {
           <span className={data.tally.differenceMinorUnits === 0 ? "status-chip is-balanced" : "status-chip is-review"}>
             {confidenceLabel}
           </span>
-          <details className="import-management">
-            <summary aria-label="Manage import">
-              <MoreHorizontal aria-hidden="true" size={18} />
-              <span>Manage import</span>
-            </summary>
-            <form action={deleteImportBatchAction}>
-              <input type="hidden" name="importBatchId" value={data.importBatch.id} />
-              <ConfirmSubmitButton
-                className="danger-action"
-                ariaLabel={`Delete import ${data.importBatch.filename}`}
-                confirmMessage={`Delete import ${data.importBatch.filename}? Its transactions will be removed from the active dashboard.`}
-              >
-                <Trash2 aria-hidden="true" size={16} />
-                <span>Delete import</span>
-              </ConfirmSubmitButton>
-            </form>
-          </details>
+          {isManualDashboard ? null : (
+            <details className="import-management">
+              <summary aria-label="Manage import">
+                <MoreHorizontal aria-hidden="true" size={18} />
+                <span>Manage import</span>
+              </summary>
+              <form action={deleteImportBatchAction}>
+                <input type="hidden" name="importBatchId" value={data.importBatch.id} />
+                <ConfirmSubmitButton
+                  className="danger-action"
+                  ariaLabel={`Delete import ${data.importBatch.filename}`}
+                  confirmMessage={`Delete import ${data.importBatch.filename}? Its transactions will be removed from the active dashboard.`}
+                >
+                  <Trash2 aria-hidden="true" size={16} />
+                  <span>Delete import</span>
+                </ConfirmSubmitButton>
+              </form>
+            </details>
+          )}
         </div>
       </header>
 
@@ -423,7 +426,8 @@ function sourceProfileLabel(sourceProfileId: string) {
   const labels: Record<string, string> = {
     "hdfc-bank-csv": "HDFC bank",
     "icici-bank-csv": "ICICI bank",
-    "icici-credit-card-csv": "ICICI credit card"
+    "icici-credit-card-csv": "ICICI credit card",
+    "manual-transactions": "Manual transactions"
   };
 
   return labels[sourceProfileId] ?? sourceProfileId;

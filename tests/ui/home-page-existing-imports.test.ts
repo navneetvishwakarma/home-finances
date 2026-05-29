@@ -9,6 +9,51 @@ vi.mock("@/db/client", () => ({
 vi.mock("@/modules/imports/persistence", () => ({
   getImportDashboard: vi.fn(),
   isCompleteImportDashboard: vi.fn((dashboard) => Boolean(dashboard.importBatch && dashboard.tally)),
+  getAvailableLedgerMonths: vi.fn(async () => ["2026-04", "2026-03"]),
+  getMonthDashboards: vi.fn(async () => [
+    {
+      importBatch: {
+        id: "import-existing-1",
+        accountId: "account-1",
+        sourceProfileId: "icici-bank-csv",
+        filename: "existing-bank.csv",
+        fileFingerprint: "sha256:existing-bank",
+        rawSource: "csv",
+        status: "imported",
+        importedAt: new Date()
+      },
+      tally: {
+        id: "tally-existing-1",
+        accountId: "account-1",
+        importBatchId: "import-existing-1",
+        totalIncomingMinorUnits: 100000,
+        totalOutgoingMinorUnits: 35000,
+        netMovementMinorUnits: 65000,
+        openingBalanceMinorUnits: 0,
+        closingBalanceMinorUnits: 65000,
+        calculatedClosingBalanceMinorUnits: 65000,
+        differenceMinorUnits: 0,
+        createdAt: new Date()
+      },
+      transactions: [
+        {
+          id: "txn-existing-1",
+          accountId: "account-1",
+          importBatchId: "import-existing-1",
+          transactionDate: "2026-04-01",
+          description: "APRIL SALARY CREDIT",
+          direction: "incoming",
+          amountMinorUnits: 100000,
+          runningBalanceMinorUnits: 100000,
+          category: "income",
+          categorySource: "system_rule",
+          rowHash: "sha256:row-1",
+          rawSourcePayload: { "S No.": "1" },
+          createdAt: new Date()
+        }
+      ]
+    }
+  ]),
   getLatestImportDashboards: vi.fn(async () => [
     {
       importBatch: {
@@ -76,6 +121,9 @@ test("renders existing imported transactions when no import batch query is provi
   const html = renderToStaticMarkup(createElement(() => page));
 
   expect(html).toContain("Consolidation summary");
+  expect(html).toContain("Month view");
+  expect(html).toContain("April 2026");
+  expect(html).toContain("March 2026");
   expect(html).toContain("existing-bank.csv");
   expect(html).toContain("APRIL SALARY CREDIT");
   expect(html).not.toContain("uploaded-without-tally.csv");
