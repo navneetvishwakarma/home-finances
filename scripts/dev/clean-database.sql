@@ -1,6 +1,13 @@
 -- Dev-only destructive reset. Clears public app tables and leaves the schema ready for first use.
 BEGIN;
 
+DO $$
+BEGIN
+  IF to_regclass('auth.dev_cleanup_login_traces') IS NOT NULL THEN
+    EXECUTE 'TRUNCATE TABLE auth.dev_cleanup_login_traces RESTART IDENTITY';
+  END IF;
+END $$;
+
 TRUNCATE TABLE
   public."transfer_matches",
   public."statement_tallies",

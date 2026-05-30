@@ -5,6 +5,401 @@
 
 ---
 
+## Execution Workflow For F-Series Issues
+
+Each F-series issue must be delivered as its own vertical slice unless Navneet explicitly batches them. Repeat this sequence for every issue:
+
+1. Pull latest `main` with `git pull --ff-only origin main`.
+2. Create a feature branch from `main`: `feature/f1-statement-metadata`, `feature/f2-floating-notifications`, `feature/f3-collapsible-side-nav`, or `feature/f4-import-drawer`.
+3. Write the first failing test that proves the target behavior.
+4. Run the focused test and confirm the expected failure.
+5. Build the minimum production change to pass.
+6. Run focused tests, then the relevant broader suite.
+7. Review the diff for product correctness, accessibility, and regression risk.
+8. Fix review findings.
+9. Run build and tests clean.
+10. Raise PR, merge after review, then pull latest `main` before starting the next issue.
+
+---
+
+## F1 — Statement Metadata Extraction
+
+**Labels:** `feature` `data-integrity` `import` `P0`
+**PRD Phase:** MVP 1.1
+**Estimated complexity:** Medium
+
+### Overview
+
+FinState must infer account identity from the statement itself instead of relying on the user to type a stable account name during import. The import flow should clearly identify statement holder, provider, provider type, obfuscated account reference, account type, and a deterministic display name. If metadata is unavailable, the system may use explicit defaults and allow edits later, but it must not guess. Account number extraction is mandatory; when no account reference can be extracted, import fails before account creation or transaction persistence.
+
+### Problem Statement
+
+Today the account identity boundary is too weak. The importer can create or update accounts from user-entered display names, while source-profile metadata is partial and inconsistent across supported profiles. This causes duplicate accounts, incorrect provider classification, and unreliable linkage between statements that belong to the same real-world account. A finance reconciliation tool loses trust if it attaches statement rows to the wrong account.
+
+### User Story
+
+As a finance operator importing bank and card statements, I want FinState to extract account metadata from the statement itself and create a clear account display name, so that every import lands under the correct account without me manually encoding provider and account details.
+
+### Functional Requirements
+
+**FR1 — Standard metadata contract**
+- Introduce a shared source-profile metadata result with these fields:
+  - `accountHolderName`
+  - `provider`
+  - `providerAbbreviation`
+  - `providerType`: `bank` | `card_issuer` | `wallet` | `unknown`
+  - `accountType`: `savings` | `current` | `credit_card` | `unknown`
+  - `accountRefObfuscated`
+  - `accountRefLast4`
+  - `currency`
+  - `metadataConfidence`: `extracted` | `defaulted`
+  - `metadataWarnings`
+- Keep field values explicit. Do not infer `savings` from "bank" unless the statement content says savings/account type or the source profile is documented as savings-only.
+
+**FR2 — Account number extraction is mandatory**
+- Every supported source profile must attempt account-reference extraction before parsing transactions.
+- If no account number, card number, or stable account reference can be extracted, `parseSourceCsv` must fail with a typed user-readable error before any account, import batch, or transaction is written.
+- The error copy must say: `Account number could not be extracted from this statement. Choose a supported statement export or add the account details manually before import.`
+
+**FR3 — Provider-specific metadata extraction**
+- ICICI bank CSV must extract account holder and account number from the statement metadata rows already present above the transaction header.
+- ICICI credit card CSV must extract a card/account reference if present in the export metadata. If the sample export lacks the reference, the profile must fail under FR2 rather than silently creating an "ICICI Bank" account.
+- HDFC bank CSV must extract account reference and holder/provider details from pre-header rows when present. If the export only contains transaction headers and no account reference, it must fail under FR2.
+- Provider defaulting is allowed only after profile detection. For example, an `icici-bank-csv` profile may default provider to `ICICI Bank` and provider abbreviation to `ICICI`; it may not default account holder or account reference.
+
+**FR4 — Deterministic display name**
+- The account display name generated from extracted metadata must be:
+  - `<Provider Abbr> <Account Type> - <Last 4 digit of Account id>`
+- Examples:
+  - `ICICI Savings - 1234`
+  - `ICICI Credit Card - 9876`
+  - `HDFC Savings - 4321`
+- Capitalization must be UI-ready. Account type values stored in the database may remain normalized slugs.
+
+**FR5 — Safe account matching**
+- On import, match an existing account by `owner_user_id + provider + accountRefObfuscated` or `owner_user_id + provider + accountRefLast4 + accountType` only when the obfuscated reference format is stable for that provider.
+- Do not match by display name alone when extracted account metadata is available.
+- If extracted metadata matches an existing account, update missing metadata fields but do not overwrite a user-edited display name unless the existing display name still equals the previous generated display name.
+
+**FR6 — Default values and user modification**
+- If account holder, account type, provider type, or currency cannot be extracted but account reference is present, create the account with explicit safe defaults:
+  - account holder: `Not captured`
+  - account type: `unknown`
+  - provider type: profile-level default or `unknown`
+  - currency: `INR` for current supported Indian bank/card profiles
+- Show these defaulted fields in Metadata → Account register and allow edit through account management.
+- Defaulted fields must be visually distinguishable from extracted fields with neutral copy such as `Not captured`, not misleading labels.
+
+**FR7 — Metadata auditability**
+- Store the extracted metadata and warnings with the account or import batch so future debugging can explain why an account was created, matched, defaulted, or rejected.
+- Existing columns may be extended if sufficient; otherwise add a small JSON metadata payload on `import_batches` or normalized columns on `accounts`.
+
+### Acceptance Criteria
+
+- [ ] **AC1:** Given a valid ICICI bank CSV with account holder and account number in metadata rows, when imported, then the account stores holder name, provider `ICICI Bank`, provider type `bank`, account type `savings` or `unknown` based on actual extractability, obfuscated account ref, last 4 digits, and display name `ICICI <Account Type> - <last4>`.
+- [ ] **AC2:** Given a valid supported statement whose account number cannot be extracted, when import is submitted, then no account, import batch, or transaction rows are created and the user sees the account-number extraction error.
+- [ ] **AC3:** Given account holder is missing but account number is extracted, when import succeeds, then holder is shown as `Not captured`, metadata confidence records a default, and the user can edit it from Metadata → Account register.
+- [ ] **AC4:** Given account type cannot be extracted, when import succeeds, then account type is stored as `unknown` and the UI does not label it as Savings, Current, or Credit Card.
+- [ ] **AC5:** Given a second statement for the same real account is imported with the same extracted account reference, when import runs, then FinState reuses the existing account instead of creating a duplicate display-name match.
+- [ ] **AC6:** Given an existing account has a user-edited display name, when another statement for that account is imported, then the user-edited display name is preserved.
+- [ ] **AC7:** Given an existing account still has a generated display name, when richer metadata changes the generated display name from `ICICI Unknown - 1234` to `ICICI Savings - 1234`, then the display name updates automatically.
+- [ ] **AC8:** Given unsupported headers, when import runs, then the existing unsupported-format error path remains unchanged and is not conflated with account-number extraction failure.
+
+### Definition of Done
+
+- [ ] Shared `SourceMetadata` type added to the source-profile boundary.
+- [ ] ICICI bank, ICICI credit card, and HDFC bank profiles implement metadata extraction or explicit typed failure.
+- [ ] `parseSourceCsv` returns metadata with account reference as a required success invariant.
+- [ ] Account creation and matching use extracted metadata before display-name fallback.
+- [ ] Database migration stores any missing required metadata fields or metadata audit payload.
+- [ ] Account register UI shows extracted/defaulted fields and supports user modification for defaulted editable fields.
+- [ ] Unit test: ICICI bank metadata extraction including holder, obfuscated ref, and generated display name.
+- [ ] Unit test: missing account reference fails before persistence.
+- [ ] Unit test: defaulted non-critical metadata does not misclassify account type.
+- [ ] Persistence test: same extracted account reference reuses the same account.
+- [ ] UI test: Metadata account register displays defaulted values as `Not captured` or `Unknown`.
+- [ ] All import, source-profile, and account-management tests remain green.
+
+### Edge Cases
+
+- Account references may appear with spaces, `X`, `*`, or partial masking. Normalize to digits for last 4 only; preserve the obfuscated source form for display/audit.
+- Credit card statements may expose only last 4 digits. If that is the only stable reference, matching must include provider and account type to avoid cross-provider collision.
+- A file may contain multiple account references in legal/footer text. Extraction must use profile-specific positions near the account metadata section, not arbitrary first number.
+- If holder name changes due to bank formatting, do not create a new account when account reference is stable.
+
+### Out of Scope
+
+- OCR/PDF metadata extraction.
+- Manual account creation before first import except as a fallback error message path.
+- Multi-currency account handling beyond preserving extracted currency when present.
+
+---
+
+## F2 — Floating Notification Enhancements
+
+**Labels:** `feature` `ui` `accessibility` `P2`
+**PRD Phase:** MVP 1.1
+**Estimated complexity:** Small
+
+### Overview
+
+Notifications should behave like transient feedback, not layout content. Success, error, and multi-file import result messages must float above the workspace, appear without pushing the page down, auto-dismiss after a short duration, fade out, and remain manually closable.
+
+### UI/UX Guidance From `ui-ux-pro-max`
+
+- Treat notifications as transient feedback for non-critical information.
+- Auto-dismiss after 3-5 seconds.
+- Critical errors must remain accessible and announced with `role="alert"` or `aria-live`.
+- Closable icon-only controls need accessible names.
+- Motion must use short opacity/transform transitions and respect `prefers-reduced-motion`.
+- Do not rely on color alone; include text and icon semantics for success, skipped, and error states.
+
+### User Story
+
+As a finance operator importing files and editing ledger data, I want notifications to confirm outcomes without shifting the dashboard layout, so that I can continue reviewing the month uninterrupted.
+
+### Functional Requirements
+
+**FR1 — Floating toast stack**
+- Move `Toasts` from normal document flow to a fixed-position floating stack.
+- Desktop position: top-right inside the app viewport with 24px margin.
+- Mobile position: top center, width `calc(100vw - 32px)`, no horizontal overflow.
+- Toasts must not cover the side nav toggle or primary month selector on initial render.
+
+**FR2 — Auto-dismiss and fade**
+- Success and skipped notifications auto-dismiss after 4 seconds.
+- Structured import result notifications auto-dismiss after 6 seconds when all rows are success/skipped.
+- Error notifications remain until closed unless they are non-blocking per-file errors inside a mixed result summary; mixed summaries auto-dismiss after 8 seconds.
+- Fade duration should be 180-240ms.
+
+**FR3 — Manual close**
+- Every toast has a close button using a Lucide `X` icon.
+- Close button has `aria-label="Dismiss notification"`.
+- Closing one toast does not dismiss unrelated toasts in the stack.
+
+**FR4 — Structured import results**
+- Multi-file import result rows remain readable inside the floating toast.
+- A summary line appears first, e.g. `Import complete: 2 imported, 1 skipped, 1 failed`.
+- The detailed rows may collapse after the toast reaches 360px height, with internal scrolling rather than page scroll.
+
+**FR5 — URL cleanup**
+- After a toast has mounted, the UI should remove transient `success`, `error`, and `importResults` query params using `history.replaceState` so refresh does not replay stale notifications.
+- Do not remove durable filters such as `month`, `view`, or `category`.
+
+### Acceptance Criteria
+
+- [ ] **AC1:** Given `?success=Imported`, when the page loads, then a floating success toast appears without shifting header, side nav, import panel, or dashboard layout.
+- [ ] **AC2:** Given a success toast appears, when 4 seconds pass, then it fades out and is removed from the accessibility tree.
+- [ ] **AC3:** Given an error toast appears, when 10 seconds pass, then it remains visible until the user closes it.
+- [ ] **AC4:** Given the user clicks the close icon, when the toast closes, then focus moves to a sensible nearby element and no layout shift occurs.
+- [ ] **AC5:** Given structured import results include success, skipped, and error rows, when rendered, then all rows are visible or scrollable inside the toast container and each state is identified by text, not color alone.
+- [ ] **AC6:** Given the toast has mounted from query params, when the user refreshes after URL cleanup, then the same toast does not replay.
+- [ ] **AC7:** Given `prefers-reduced-motion: reduce`, when a toast dismisses, then the fade/slide transition is effectively disabled.
+
+### Definition of Done
+
+- [ ] `Toasts` converted to a client component or a small client wrapper handles close, timers, and URL cleanup.
+- [ ] CSS adds fixed `.toast-stack` positioning, z-index, animation states, reduced-motion handling, and responsive width constraints.
+- [ ] Lucide close icon used for dismissal.
+- [ ] Success/skipped/error copy remains server-rendered or serializable from current query params.
+- [ ] UI test: success toast auto-dismisses.
+- [ ] UI test: error toast remains until closed.
+- [ ] UI test: query params are cleaned without removing `month`, `view`, or `category`.
+- [ ] Accessibility test or assertion: error uses `role="alert"` and close buttons have accessible names.
+- [ ] No horizontal scroll at 375px viewport.
+
+### Edge Cases
+
+- Multiple toasts arrive together from `success` plus `importResults`; stack order should be most severe first: error, mixed import results, success.
+- Very long filenames must wrap within the toast and never widen the viewport.
+- If JavaScript fails, server-rendered messages may remain inline as a no-JS fallback, but the enhanced path should float once hydrated.
+
+### Out of Scope
+
+- Persistent notification center.
+- Browser push notifications.
+
+---
+
+## F3 — Collapsible Side Navigation
+
+**Labels:** `feature` `ui` `navigation` `accessibility` `P2`
+**PRD Phase:** MVP 1.1
+**Estimated complexity:** Small-Medium
+
+### Overview
+
+The side nav should collapse and expand so reconciliation screens can reclaim horizontal space. The collapsed state must preserve navigation clarity through icons, tooltips or accessible labels, and keyboard support. Mobile should use a compact top navigation or drawer behavior rather than a permanently wide side rail.
+
+### UI/UX Guidance From `ui-ux-pro-max`
+
+- Keep keyboard navigation in visual order.
+- Provide a skip-to-main link once navigation becomes denser.
+- Fixed or sticky navigation must not obscure content.
+- Prevent horizontal scroll on mobile.
+- Icon-only buttons need accessible labels.
+- Use `next/link` for internal navigation rather than raw anchors when implementing the Next.js version.
+
+### User Story
+
+As a finance operator reviewing dense transaction data, I want to collapse the side navigation, so that the ledger gets more space while profile, transaction, and metadata navigation remain one click away.
+
+### Functional Requirements
+
+**FR1 — Expand/collapse control**
+- Add a side-nav toggle button at the top of the nav using Lucide `PanelLeftClose` / `PanelLeftOpen` or nearest available icon.
+- Expanded width remains approximately current `240px`.
+- Collapsed width should be 64-72px and show icons only.
+- The active route must remain visually obvious in both states.
+
+**FR2 — State persistence**
+- Persist collapsed state in `localStorage` under a stable key such as `finstate.sideNavCollapsed`.
+- Default desktop state: expanded.
+- Default mobile state: collapsed or top-drawer, whichever produces less content obstruction.
+- If storage is unavailable, fall back to expanded desktop behavior.
+
+**FR3 — Accessible collapsed nav**
+- Icon-only nav items must keep accessible names with `aria-label`.
+- Tooltips or visible labels on hover/focus may show the item name, but screen-reader labels cannot depend on hover.
+- Add a skip link to jump to the main content area.
+- The toggle button must expose `aria-expanded` and `aria-controls`.
+
+**FR4 — Layout adaptation**
+- `app-frame` grid columns must transition between expanded and collapsed widths without pushing content off screen.
+- The main content column must stay `minmax(0, 1fr)`.
+- The side nav remains sticky on desktop and non-overlapping on mobile.
+
+**FR5 — Account identity display**
+- Expanded nav shows user display name and email as today.
+- Collapsed nav shows a compact avatar/initials circle.
+- User details must not overflow; long names and emails wrap or truncate cleanly.
+
+### Acceptance Criteria
+
+- [ ] **AC1:** Given the nav is expanded, when the user clicks the collapse button, then the nav width reduces, labels hide, icons remain visible, and dashboard content gains horizontal space.
+- [ ] **AC2:** Given the nav is collapsed, when the user clicks expand, then labels and user details return without losing the selected view state.
+- [ ] **AC3:** Given the user collapses the nav and refreshes, then the nav remains collapsed.
+- [ ] **AC4:** Given keyboard focus reaches the nav toggle, when the user presses Enter or Space, then the nav toggles and `aria-expanded` updates.
+- [ ] **AC5:** Given the nav is collapsed, when a screen reader reaches a nav item, then it announces `User profile`, `Transactions`, `Metadata`, or `Logout`.
+- [ ] **AC6:** Given a 375px viewport, when the page renders, then no horizontal scroll appears and the nav does not obscure month controls or ledger content.
+- [ ] **AC7:** Given a long user email, when the nav is expanded or collapsed, then text does not overflow outside the nav.
+
+### Definition of Done
+
+- [ ] Side nav has a client wrapper for persisted collapse state.
+- [ ] Internal navigation uses `next/link` for app routes.
+- [ ] CSS supports expanded and collapsed side-nav states, responsive behavior, focus states, and no layout shift beyond intentional grid width change.
+- [ ] Skip link added before primary navigation and targets the main workspace.
+- [ ] UI test: toggles collapsed and expanded states.
+- [ ] UI test: collapsed state persists across reload.
+- [ ] Accessibility assertions for `aria-expanded`, `aria-controls`, and icon-only item labels.
+- [ ] Responsive check passes at 375px, 768px, 1024px, and 1440px.
+
+### Edge Cases
+
+- Hydration must not produce a distracting flash from expanded to collapsed. Use a small initial-state class or defer transition until after hydration.
+- If the user opens print mode or no-JS mode, expanded navigation is acceptable.
+- The logout form still works when collapsed and must not become an unlabeled icon.
+
+### Out of Scope
+
+- User-customizable nav item ordering.
+- Deep nested navigation or breadcrumbs.
+
+---
+
+## F4 — Import Widget Progressive Disclosure
+
+**Labels:** `feature` `ui` `workflow` `P2`
+**PRD Phase:** MVP 1.1
+**Estimated complexity:** Medium
+
+### Overview
+
+Statement import is important but infrequent. It should not permanently consume the left column of the reconciliation workspace. Replace the always-visible import panel with a compact import entry point that opens a focused drawer or popover when needed, while keeping month review and transaction analysis as the default screen.
+
+### UI/UX Guidance From `ui-ux-pro-max`
+
+- Low-frequency actions belong behind progressive disclosure, not permanent prime workspace.
+- File upload forms still need visible labels and clear supported-source copy once opened.
+- Keyboard users must be able to open, submit, and close the widget without traps.
+- Avoid horizontal scroll and fixed overlays that hide core content on mobile.
+- Use server actions for the import mutation; the UI shell can be client-side, but import submission should stay in the existing Next.js Server Action path.
+
+### User Story
+
+As a finance operator reviewing a month, I want import controls available on demand but not permanently occupying screen space, so that the default workspace focuses on reconciliation rather than setup.
+
+### Functional Requirements
+
+**FR1 — Compact import entry point**
+- Remove the permanent import column from the default desktop workspace.
+- Add an `Import statements` action in the dashboard header or month cockpit toolbar.
+- Use a Lucide upload/import icon plus text on desktop; icon-only with tooltip or accessible label is acceptable on narrow mobile.
+- The action is disabled when the selected month is closed and shows closed-month copy.
+
+**FR2 — Import drawer**
+- Clicking `Import statements` opens a right-side drawer on desktop.
+- Drawer width: 420-480px, constrained to viewport.
+- Mobile uses a full-screen sheet or top-level stacked panel.
+- Drawer includes the existing fields: statement month, source profile, account name, statement files, submit button, credit-card coverage note, and supported sources.
+
+**FR3 — Workflow continuity**
+- The drawer must preserve current `month`, `view`, and `category` context when opened and closed.
+- Successful import closes the drawer after submission redirect and shows the floating notification from F2.
+- Failed validation keeps the drawer open where practical; if server redirect is used, include enough URL state to reopen the drawer with the error.
+
+**FR4 — Progressive disclosure states**
+- Default state: import drawer closed, dashboard uses the reclaimed width.
+- Open state: background content remains visible on desktop but inert enough to avoid accidental interaction if using a modal drawer.
+- Close actions: close icon, Escape key, clicking overlay if overlay exists.
+- Unsaved selected files: if the drawer is closed with files selected, clear the selection; no confirmation is required because browser file inputs are not durable state.
+
+**FR5 — Closed-month and no-month behavior**
+- If selected month is closed, show `Reopen month to import statements` in the import entry point and block submission server-side.
+- If no months exist yet, the dashboard empty state must prominently show `Import statements` as the first action.
+- The import drawer month field defaults to the selected month if one exists; otherwise use the current local month.
+
+### Acceptance Criteria
+
+- [ ] **AC1:** Given the transactions view loads on desktop, when no import drawer is open, then the import form does not occupy a permanent column and the dashboard panel uses the available width.
+- [ ] **AC2:** Given the user clicks `Import statements`, when the drawer opens, then all current import fields and supported-source guidance are available with visible labels.
+- [ ] **AC3:** Given the drawer is open, when the user presses Escape or clicks the close button, then it closes and focus returns to `Import statements`.
+- [ ] **AC4:** Given the selected month is closed, when the user tries to import, then the UI blocks the drawer submit affordance and the server action still rejects direct submissions.
+- [ ] **AC5:** Given the user imports successfully, when the page redirects, then the drawer is closed and a floating import result notification appears.
+- [ ] **AC6:** Given an import validation error occurs, when the redirect completes, then the error is visible and the user can immediately reopen or remains in the import drawer context.
+- [ ] **AC7:** Given a 375px viewport, when the drawer opens, then it fits the viewport without horizontal scroll and all form controls are reachable.
+- [ ] **AC8:** Given no months exist, when the empty dashboard renders, then `Import statements` is the primary visible action.
+
+### Definition of Done
+
+- [ ] `TransactionsView` no longer renders `import-panel` as a permanent grid column.
+- [ ] Import form extracted into a reusable component rendered inside an on-demand drawer/sheet.
+- [ ] Client wrapper manages drawer open/close, focus return, Escape handling, and responsive sheet behavior.
+- [ ] Existing `importIciciStatement` server action remains the mutation path.
+- [ ] Closed-month UI state added and server-side guard retained.
+- [ ] CSS updates workspace layout to one primary dashboard column with on-demand drawer overlay.
+- [ ] UI test: import drawer opens/closes and returns focus.
+- [ ] UI test: all import fields render inside drawer.
+- [ ] UI test: no permanent import panel space remains on desktop.
+- [ ] UI test: mobile drawer has no horizontal overflow.
+- [ ] Existing import action, account-name input, and import result tests remain green.
+
+### Edge Cases
+
+- Multiple import clicks should not open duplicate drawers.
+- Long supported-source text and long filenames must wrap inside the drawer.
+- If JavaScript fails, expose a fallback import section below the empty state or dashboard, not as a permanent desktop column.
+- While import is submitting, close controls may remain available, but submission state must be clear and duplicate submits prevented.
+
+### Out of Scope
+
+- Drag-and-drop upload zone redesign.
+- Async import progress beyond the existing submit/progress behavior.
+- Global command palette for imports.
+
+---
+
 ## Issue 1 — Fix Running Balance for Manual Transactions
 
 **Labels:** `bug` `data-integrity` `P0`
@@ -646,14 +1041,18 @@ As a finance operator uploading 4 statement files for month-close, I want to see
 
 | # | Issue | Priority | Phase | Complexity |
 |---|-------|----------|-------|------------|
+| F1 | Statement Metadata Extraction | P0 | MVP 1.1 | Medium |
 | 1 | Fix Running Balance for Manual Transactions | P0 | MVP 1.1 | Small |
 | 2 | Cross-Batch Row-Level Deduplication | P0 | MVP 1.1 | Medium |
 | 3 | Consolidated Month Tally Across All Instruments | P1 | MVP 1.1 | Medium |
 | 4 | Transfer Detection Between Own Accounts | P1 | MVP 1.1 | Large |
 | 5 | Month-Close Lifecycle | P1 | MVP 1.1 | Medium |
+| F2 | Floating Notification Enhancements | P2 | MVP 1.1 | Small |
+| F3 | Collapsible Side Navigation | P2 | MVP 1.1 | Small-Medium |
+| F4 | Import Widget Progressive Disclosure | P2 | MVP 1.1 | Medium |
 | 6 | Account Management UI | P2 | MVP 1.1 | Small–Medium |
 | 7 | Category Spend Summary by Month | P2 | MVP 1.1 | Small–Medium |
 | 8 | Resilient Multi-File Import with Per-File Error Reporting | P3 | MVP 1.1 | Small |
 
-**Recommended sequencing:** 1 → 2 → 3 → 5 → 6 → 8 → 7 → 4
-Reason: fix data integrity first (1, 2), then build the core consolidated view (3), then close lifecycle (5), then management and reliability (6, 8), then the analytical layer (7), then the complex transfer detection that depends on the consolidated view being correct (4).
+**Recommended sequencing:** F1 → 1 → 2 → 3 → 5 → 6 → 8 → F2 → F3 → F4 → 7 → 4
+Reason: fix account identity and data integrity first (F1, 1, 2), then build the core consolidated view and lifecycle controls (3, 5), then account management and import reliability (6, 8). After that, ship the UX hardening sequence: floating feedback first (F2), layout navigation second (F3), and import progressive disclosure third (F4), because F4 depends on the notification behavior and reclaimed navigation space feeling stable. The analytical layer (7) and transfer detection (4) come after the review workspace is structurally correct.
