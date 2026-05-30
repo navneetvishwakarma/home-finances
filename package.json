@@ -5,6 +5,8 @@
   "scripts": {
     "dev": "next dev",
     "build": "npm run credscan && next build",
+    "db:migrate": "node scripts/migrate-database.mjs",
+    "prod:build": "npm run db:migrate && npm run build",
     "credscan": "node scripts/credscan.mjs",
     "start": "next start",
     "test": "vitest run",
