@@ -36,6 +36,11 @@ function isSupabasePostgresUrl(url: string) {
 
 export async function getMigratedDatabase() {
   const database = getDatabase();
+
+  if (process.env.NODE_ENV === "production") {
+    return database;
+  }
+
   migration ??= migrate(database, { migrationsFolder: "drizzle" });
   await migration;
 
