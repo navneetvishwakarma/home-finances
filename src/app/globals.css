@@ -297,7 +297,12 @@ select {
   margin: 0;
 }
 
+.workspace.has-ledger {
+  grid-template-columns: minmax(0, 1fr);
+}
+
 .import-panel,
+.import-disclosure,
 .dashboard-panel {
   border: 1px solid var(--line);
   border-radius: var(--radius-panel);
@@ -309,6 +314,34 @@ select {
 .import-panel {
   align-self: start;
   min-width: 0;
+  padding: 22px;
+}
+
+.import-disclosure {
+  min-width: 0;
+  padding: 0;
+}
+
+.import-disclosure summary {
+  display: flex;
+  align-items: center;
+  min-height: 48px;
+  padding: 0 18px;
+  color: #323946;
+  font-size: 13px;
+  font-weight: 800;
+  cursor: pointer;
+}
+
+.import-disclosure summary:hover {
+  color: var(--blue);
+  background: rgba(239, 246, 255, 0.7);
+}
+
+.import-disclosure-body {
+  display: grid;
+  gap: 18px;
+  border-top: 1px solid var(--line);
   padding: 22px;
 }
 
@@ -384,6 +417,13 @@ select {
   gap: 16px;
 }
 
+.import-disclosure form {
+  display: grid;
+  grid-template-columns: minmax(150px, 0.8fr) minmax(170px, 1fr) minmax(180px, 1fr) minmax(220px, 1.4fr) minmax(130px, auto);
+  gap: 14px;
+  align-items: end;
+}
+
 .field {
   display: grid;
   gap: 8px;
@@ -416,6 +456,7 @@ select {
 .month-view-selector select:focus,
 .month-view-selector button:focus,
 .user-session button:focus,
+.import-disclosure summary:focus,
 .import-management summary:focus,
 .record-edit-panel summary:focus,
 .add-transaction-trigger:focus,
@@ -1535,6 +1576,10 @@ select {
 
   .month-view-selector {
     display: grid;
+  }
+
+  .import-disclosure form {
+    grid-template-columns: 1fr;
   }
 
   .add-transaction-trigger {

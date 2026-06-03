@@ -172,52 +172,22 @@ function TransactionsView({
   transferCandidates: Awaited<ReturnType<typeof detectTransferCandidates>>;
 }) {
   const isClosed = monthCloseStatus?.status === "closed";
+  const hasLedgerMonths = availableMonths.length > 0;
 
   return (
-    <div className="workspace">
-      <aside className="import-panel">
-        <div className="panel-heading">
-          <p className="section-kicker">Month-close intake</p>
-          <h2>Upload all statement files</h2>
-          <p>Build one complete monthly view by uploading every bank and card statement that covers the month.</p>
-        </div>
-
-        <form action={importIciciStatement}>
-          <label className="field">
-            <span>Statement month</span>
-            <input name="month" type="month" defaultValue="2026-04" />
-          </label>
-          <label className="field">
-            <span>Source profile</span>
-            <select defaultValue="auto" aria-label="Source profile">
-              <option value="auto">Auto-detect supported profile</option>
-            </select>
-          </label>
-          <label className="field">
-            <span>Account name</span>
-            <AccountNameInput activeAccountNames={activeAccountNames} />
-          </label>
-          <label className="field">
-            <span>Statement files</span>
-            <input name="statements" type="file" accept=".csv,text/csv,.txt,text/plain" multiple required />
-          </label>
-          <ImportSubmitButton />
-        </form>
-
-        <section className="coverage-card" aria-labelledby="coverage-heading">
-          <h3 id="coverage-heading">Credit card coverage</h3>
-          <p>Upload at least 2 billing files when a card cycle cuts through the middle of the month.</p>
-        </section>
-
-        <section className="support-card" aria-labelledby="supported-sources-heading">
-          <h3 id="supported-sources-heading">Supported sources</h3>
-          <ul>
-            <li>ICICI bank CSV</li>
-            <li>HDFC bank CSV</li>
-            <li>ICICI credit card CSV</li>
-          </ul>
-        </section>
-      </aside>
+    <div className={hasLedgerMonths ? "workspace has-ledger" : "workspace"}>
+      {hasLedgerMonths ? (
+        <details className="import-disclosure">
+          <summary>Import statements</summary>
+          <div className="import-disclosure-body">
+            <ImportWorkspace activeAccountNames={activeAccountNames} defaultMonth={selectedMonth || undefined} />
+          </div>
+        </details>
+      ) : (
+        <aside className="import-panel">
+          <ImportWorkspace activeAccountNames={activeAccountNames} />
+        </aside>
+      )}
 
       <section className="dashboard-panel">
         <form className="month-view-selector" aria-label="Month view">
@@ -281,6 +251,60 @@ function TransactionsView({
         )}
       </section>
     </div>
+  );
+}
+
+function ImportWorkspace({
+  activeAccountNames,
+  defaultMonth = "2026-04"
+}: {
+  activeAccountNames: string[];
+  defaultMonth?: string;
+}) {
+  return (
+    <>
+      <div className="panel-heading">
+        <p className="section-kicker">Month-close intake</p>
+        <h2>Upload all statement files</h2>
+        <p>Build one complete monthly view by uploading every bank and card statement that covers the month.</p>
+      </div>
+
+      <form action={importIciciStatement}>
+        <label className="field">
+          <span>Statement month</span>
+          <input name="month" type="month" defaultValue={defaultMonth} />
+        </label>
+        <label className="field">
+          <span>Source profile</span>
+          <select defaultValue="auto" aria-label="Source profile">
+            <option value="auto">Auto-detect supported profile</option>
+          </select>
+        </label>
+        <label className="field">
+          <span>Account name</span>
+          <AccountNameInput activeAccountNames={activeAccountNames} />
+        </label>
+        <label className="field">
+          <span>Statement files</span>
+          <input name="statements" type="file" accept=".csv,text/csv,.txt,text/plain" multiple required />
+        </label>
+        <ImportSubmitButton />
+      </form>
+
+      <section className="coverage-card" aria-labelledby="coverage-heading">
+        <h3 id="coverage-heading">Credit card coverage</h3>
+        <p>Upload at least 2 billing files when a card cycle cuts through the middle of the month.</p>
+      </section>
+
+      <section className="support-card" aria-labelledby="supported-sources-heading">
+        <h3 id="supported-sources-heading">Supported sources</h3>
+        <ul>
+          <li>ICICI bank CSV</li>
+          <li>HDFC bank CSV</li>
+          <li>ICICI credit card CSV</li>
+        </ul>
+      </section>
+    </>
   );
 }
 

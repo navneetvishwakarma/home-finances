@@ -102,6 +102,8 @@ test("renders the MVP 1 upload entry point for authenticated users", async () =>
   expect(html).toContain("Metadata");
   expect(html).toContain("Logout");
   expect(html).toContain("FinState Command Centre");
+  expect(html).toContain('class="import-panel"');
+  expect(html).not.toContain('class="import-disclosure"');
   expect(html).toContain("Month-close intake");
   expect(html).toContain("Statement month");
   expect(html).toContain("Source profile");
