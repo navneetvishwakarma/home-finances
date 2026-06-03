@@ -11,6 +11,14 @@ These instructions apply to this repository.
 - Before running tests, set `TEST_DATABASE_URL` in PowerShell:
   `$env:TEST_DATABASE_URL="postgres://postgres:Tmkdmtad@2@localhost:5432/home-finances-dev"`
 
+## Database Migration Rules
+
+- Every database schema change must include a new ordered Drizzle migration file under `drizzle/`.
+- Maintain `docs/database/create.sql` as the latest fresh-database bootstrap script with the final schema after all migrations.
+- Maintain `docs/database/master-migration.sql` as the single-file ordered migration history for bringing existing databases to the latest schema.
+- Whenever a numbered migration is added or edited, update both `docs/database/create.sql` and `docs/database/master-migration.sql` in the same change.
+- These master SQL files are for review/bootstrap/reference workflows. Do not register them with Drizzle or place them in the active migration journal.
+
 ## Branch And Commit Policy
 
 - Create a feature branch for every MVP slice or sufficiently large feature.
