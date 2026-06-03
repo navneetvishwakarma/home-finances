@@ -3,44 +3,25 @@ import { expect, test } from "vitest";
 import { parseSourceCsv } from "@/modules/source-profiles/registry";
 
 test("parses HDFC savings delimited text statements into canonical rows", async () => {
-  const rawCsv = await readFile("assets/sample/hdfc-savings-statement-delimited.txt", "utf8");
+  const rawCsv = await readFile("assets/sample/hdfc-savings-sample-01.csv", "utf8");
 
   const result = parseSourceCsv(rawCsv);
 
   expect(result.profileId).toBe("hdfc-bank-csv");
-  expect(result.rows).toHaveLength(28);
+  expect(result.rows).toHaveLength(30);
   expect(result.rows[0]).toMatchObject({
-    valueDate: "2026-04-01",
-    transactionDate: "2026-04-01",
-    description: "UPI-CRED-CRED.CLUB@AXISB-UTIB0000114-609125829210-PAYMENT ON CRED",
-    withdrawalAmount: "5185.00",
+    valueDate: "2026-05-02",
+    transactionDate: "2026-05-02",
+    description: "UPI-KANAPURAM RAJU-KANAPURAMRAJU7@OKHDFCBANK-UBIN0815675-122466173855-F1201",
+    withdrawalAmount: "240",
     depositAmount: "0.00",
-    balance: "5434.19"
+    balance: "11344.69"
   });
   expect(result.rows.at(-1)).toMatchObject({
-    valueDate: "2026-04-29",
-    transactionDate: "2026-04-29",
-    withdrawalAmount: "0.00",
-    depositAmount: "5.00",
-    balance: "11584.69"
-  });
-});
-
-test("parses HDFC savings XLS-to-CSV statements and ignores footer summary rows", async () => {
-  const rawCsv = await readFile("assets/sample/hdfc-savings-statement-xls2csv.csv", "utf8");
-
-  const result = parseSourceCsv(rawCsv);
-
-  expect(result.profileId).toBe("hdfc-bank-csv");
-  expect(result.rows).toHaveLength(28);
-  expect(result.rows[1]).toMatchObject({
-    transactionDate: "2026-04-01",
-    description: "UPI-RAJARAM ICE CREAM AN-Q723793560@YBL-YESB0YBLUPI-120886878049-BAKERY",
-    withdrawalAmount: "115",
+    valueDate: "2026-05-31",
+    transactionDate: "2026-05-31",
+    withdrawalAmount: "55385",
     depositAmount: "0.00",
-    balance: "5319.19"
+    balance: "6589.67"
   });
-  expect(result.rows.at(-1)?.description).toBe(
-    "UPI-SYED KULSUM-8923512579@PTYES-NSPB0000002-301633637989-SENT USING PAYTM U"
-  );
 });

@@ -47,7 +47,7 @@ export const iciciBankCsvProfile = {
   parse(rawCsv: string, headerIndex: number): CanonicalParsedRow[] {
     const records = parseCsvRecords(rawCsv);
     const headers = records[headerIndex];
-    const dataRecords = records.slice(headerIndex + 1);
+    const dataRecords = mergeContinuationRows(records.slice(headerIndex + 1), headers);
 
     return dataRecords
       .filter((record) => isTransactionRecord(record, headers))
@@ -66,6 +66,29 @@ export const iciciBankCsvProfile = {
       });
   }
 };
+
+function mergeContinuationRows(records: string[][], headers: string[]) {
+  const mergedRecords: string[][] = [];
+
+  for (const record of records) {
+    if (isTransactionRecord(record, headers)) {
+      mergedRecords.push([...record]);
+      continue;
+    }
+
+    const currentRecord = mergedRecords.at(-1);
+    const continuedDescription = cell(record, headers, "Transaction Remarks");
+
+    if (currentRecord && continuedDescription !== "") {
+      const descriptionIndex = headers.indexOf("Transaction Remarks");
+      currentRecord[descriptionIndex] = [currentRecord[descriptionIndex], continuedDescription]
+        .filter((value) => value && value.trim() !== "")
+        .join(" ");
+    }
+  }
+
+  return mergedRecords;
+}
 
 function cell(record: string[], headers: string[], header: string) {
   return record[headers.indexOf(header)] ?? "";

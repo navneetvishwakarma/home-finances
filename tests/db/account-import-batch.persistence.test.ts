@@ -71,7 +71,7 @@ test("persists a bank account and an import batch through the database schema", 
   const importBatch = await createImportBatch(db, {
     accountId: account.id,
     sourceProfileId: "icici-bank-csv",
-    filename: "2604-icici-savings-statement.csv",
+    filename: "icici-savings-sample-01.csv",
     fileFingerprint: "sha256:test-fixture",
     rawSource: "csv-content",
     status: "imported"
@@ -87,14 +87,14 @@ test("persists a bank account and an import batch through the database schema", 
   expect(importBatch).toMatchObject({
     accountId: account.id,
     sourceProfileId: "icici-bank-csv",
-    filename: "2604-icici-savings-statement.csv",
+    filename: "icici-savings-sample-01.csv",
     fileFingerprint: "sha256:test-fixture",
     status: "imported"
   });
 });
 
 test("reuses the existing import batch when the same ICICI CSV is uploaded twice for one account", async () => {
-  const rawCsv = await readFile("assets/sample/2604-icici-savings-statement.csv", "utf8");
+  const rawCsv = await readFile("assets/sample/icici-savings-sample-01.csv", "utf8");
   const account = await createAccount(db, {
     displayName: "ICICI Savings Duplicate Test",
     providerLabel: "ICICI Bank",
@@ -103,13 +103,13 @@ test("reuses the existing import batch when the same ICICI CSV is uploaded twice
 
   const firstUpload = await uploadIciciCsvForAccount(db, {
     accountId: account.id,
-    filename: "2604-icici-savings-statement.csv",
+    filename: "icici-savings-sample-01.csv",
     rawCsv
   });
 
   const duplicateUpload = await uploadIciciCsvForAccount(db, {
       accountId: account.id,
-      filename: "2604-icici-savings-statement.csv",
+      filename: "icici-savings-sample-01.csv",
       rawCsv
     });
 
@@ -127,7 +127,7 @@ test("reuses the existing import batch when the same ICICI CSV is uploaded twice
   expect(persistedBatch).toMatchObject({
     accountId: account.id,
     sourceProfileId: "icici-bank-csv",
-    filename: "2604-icici-savings-statement.csv",
+    filename: "icici-savings-sample-01.csv",
     rawSource: rawCsv,
     status: "uploaded"
   });
@@ -135,7 +135,7 @@ test("reuses the existing import batch when the same ICICI CSV is uploaded twice
 });
 
 test("persists parsed ICICI rows as canonical bank transactions", async () => {
-  const rawCsv = await readFile("assets/sample/2604-icici-savings-statement.csv", "utf8");
+  const rawCsv = await readFile("assets/sample/icici-savings-sample-01.csv", "utf8");
   const account = await createAccount(db, {
     displayName: "ICICI Savings Ledger Test",
     providerLabel: "ICICI Bank",
@@ -143,7 +143,7 @@ test("persists parsed ICICI rows as canonical bank transactions", async () => {
   });
   const importBatch = await uploadIciciCsvForAccount(db, {
     accountId: account.id,
-    filename: "2604-icici-savings-statement.csv",
+    filename: "icici-savings-sample-01.csv",
     rawCsv
   });
   const parsedRows = parseSourceCsv(rawCsv).rows;
@@ -151,7 +151,7 @@ test("persists parsed ICICI rows as canonical bank transactions", async () => {
   const persistedTransactions = await persistParsedTransactions(db, {
     accountId: account.id,
     importBatchId: importBatch.id,
-    rows: [parsedRows[0], parsedRows[2]]
+    rows: [parsedRows[0], parsedRows[4]]
   });
 
   const transactionsByDirection = Object.fromEntries(
@@ -170,23 +170,23 @@ test("persists parsed ICICI rows as canonical bank transactions", async () => {
   expect(transactionsByDirection.incoming).toMatchObject({
     accountId: account.id,
     importBatchId: importBatch.id,
-    transactionDate: "2026-04-02",
-    description: "ACCT CLOSURE TRANSACTION 0354",
+    transactionDate: "2026-05-04",
+    description: "UPI/NAVNEET KU/navneet.nifft-/RDs/HDFC BANK/122615852638/HDF58f4840ac39b4f1186c297b72148f332",
     direction: "incoming",
-    amountMinorUnits: 14920000,
-    runningBalanceMinorUnits: 15226846
+    amountMinorUnits: 2500000,
+    runningBalanceMinorUnits: 3369077
   });
   expect(transactionsByDirection.incoming.rowHash).toMatch(/^sha256:[a-f0-9]{64}$/);
   expect(incoming.rawSourcePayload).toMatchObject({
-    "Transaction Remarks": "ACCT CLOSURE TRANSACTION 0354",
-    "Deposit Amount(INR)": "149200.00"
+    "Transaction Remarks": "UPI/NAVNEET KU/navneet.nifft-/RDs/HDFC BANK/122615852638/HDF58f4840ac39b4f1186c297b72148f332",
+    "Deposit Amount(INR)": "25000.00"
   });
   expect(transactionsByDirection.outgoing).toMatchObject({
-    transactionDate: "2026-04-05",
+    transactionDate: "2026-05-05",
     description: "INF/IWISH CONTRIBUTION",
     direction: "outgoing",
     amountMinorUnits: 620000,
-    runningBalanceMinorUnits: 15336546,
+    runningBalanceMinorUnits: 7370131,
     category: "savings_investments",
     categorySource: "system_rule"
   });
@@ -300,7 +300,7 @@ test("edits imported transaction display fields without mutating source identity
 });
 
 test("restores a manually deleted imported transaction when the same source is re-imported", async () => {
-  const rawCsv = await readFile("assets/sample/2604-icici-savings-statement.csv", "utf8");
+  const rawCsv = await readFile("assets/sample/icici-savings-sample-01.csv", "utf8");
   const account = await createAccount(db, {
     displayName: "Imported Transaction Restore Test",
     providerLabel: "ICICI Bank",
@@ -308,7 +308,7 @@ test("restores a manually deleted imported transaction when the same source is r
   });
   const importBatch = await uploadIciciCsvForAccount(db, {
     accountId: account.id,
-    filename: "2604-icici-savings-statement.csv",
+    filename: "icici-savings-sample-01.csv",
     rawCsv
   });
   const [firstParsedRow] = parseSourceCsv(rawCsv).rows;
@@ -323,7 +323,7 @@ test("restores a manually deleted imported transaction when the same source is r
 
   const duplicateImportBatch = await uploadIciciCsvForAccount(db, {
     accountId: account.id,
-    filename: "2604-icici-savings-statement.csv",
+    filename: "icici-savings-sample-01.csv",
     rawCsv
   });
   await persistParsedTransactions(db, {
@@ -547,10 +547,10 @@ test("backfills existing manual transaction running balances idempotently", asyn
 });
 
 test("deleting an import hides its source-derived transactions from active dashboards", async () => {
-  const rawCsv = await readFile("assets/sample/2604-icici-savings-statement.csv", "utf8");
+  const rawCsv = await readFile("assets/sample/icici-savings-sample-01.csv", "utf8");
   const dashboard = await runIciciCsvImport(db, {
     accountDisplayName: "Import Delete Test",
-    filename: "2604-icici-savings-statement.csv",
+    filename: "icici-savings-sample-01.csv",
     rawCsv
   });
 
@@ -562,7 +562,7 @@ test("deleting an import hides its source-derived transactions from active dashb
 });
 
 test("computes and persists a statement tally for an imported ledger", async () => {
-  const rawCsv = await readFile("assets/sample/2604-icici-savings-statement.csv", "utf8");
+  const rawCsv = await readFile("assets/sample/icici-savings-sample-01.csv", "utf8");
   const account = await createAccount(db, {
     displayName: "ICICI Savings Tally Test",
     providerLabel: "ICICI Bank",
@@ -570,7 +570,7 @@ test("computes and persists a statement tally for an imported ledger", async () 
   });
   const importBatch = await uploadIciciCsvForAccount(db, {
     accountId: account.id,
-    filename: "2604-icici-savings-statement.csv",
+    filename: "icici-savings-sample-01.csv",
     rawCsv
   });
   const parsedRows = parseSourceCsv(rawCsv).rows;
@@ -588,12 +588,12 @@ test("computes and persists a statement tally for an imported ledger", async () 
   expect(tally).toMatchObject({
     accountId: account.id,
     importBatchId: importBatch.id,
-    totalIncomingMinorUnits: 15649700,
-    totalOutgoingMinorUnits: 620000,
-    netMovementMinorUnits: 15029700,
-    openingBalanceMinorUnits: 306846,
-    closingBalanceMinorUnits: 15336546,
-    calculatedClosingBalanceMinorUnits: 15336546,
+    totalIncomingMinorUnits: 8038500,
+    totalOutgoingMinorUnits: 767446,
+    netMovementMinorUnits: 7271054,
+    openingBalanceMinorUnits: 869077,
+    closingBalanceMinorUnits: 8140131,
+    calculatedClosingBalanceMinorUnits: 8140131,
     differenceMinorUnits: 0
   });
 
@@ -651,7 +651,7 @@ test("persists transaction and tally amounts above 32-bit integer range", async 
 });
 
 test("renders persisted tally values and ledger rows in the dashboard", async () => {
-  const rawCsv = await readFile("assets/sample/2604-icici-savings-statement.csv", "utf8");
+  const rawCsv = await readFile("assets/sample/icici-savings-sample-01.csv", "utf8");
   const account = await createAccount(db, {
     displayName: "ICICI Savings Dashboard Test",
     providerLabel: "ICICI Bank",
@@ -659,7 +659,7 @@ test("renders persisted tally values and ledger rows in the dashboard", async ()
   });
   const importBatch = await uploadIciciCsvForAccount(db, {
     accountId: account.id,
-    filename: "2604-icici-savings-statement.csv",
+    filename: "icici-savings-sample-01.csv",
     rawCsv
   });
   const parsedRows = parseSourceCsv(rawCsv).rows;
@@ -678,48 +678,48 @@ test("renders persisted tally values and ledger rows in the dashboard", async ()
 
   expect(html).toContain("Import batch");
   expect(html).toContain(importBatch.id);
-  expect(html).toContain("INR 156,497.00");
-  expect(html).toContain("INR 6,200.00");
-  expect(html).toContain("INR 150,297.00");
+  expect(html).toContain("INR 80,385.00");
+  expect(html).toContain("INR 7,674.46");
+  expect(html).toContain("INR 72,710.54");
   expect(html).toContain("Balanced");
-  expect(html).toContain("ACCT CLOSURE TRANSACTION 0354");
+  expect(html).toContain("UPI/NAVNEET KU/navneet.nifft-/RDs/HDFC BANK/122615852638/HDF58f4840ac39b4f1186c297b72148f332");
   expect(html).toContain("Incoming");
-  expect(html).toContain("INF/IWISH CONTRIBUTION");
+  expect(html).toContain("UPI/AXIS BANK/fcpgaxisbankbs/UPI/AXIS BANK/649177254396/FCPGUPIINTENTbbd84ed50e364244645474/");
   expect(html).toContain("Outgoing");
-  expect(html).toContain("INR 153,365.46");
+  expect(html).toContain("INR 81,401.31");
 });
 
 test("runs the full ICICI import flow and returns dashboard data for the UI", async () => {
-  const rawCsv = await readFile("assets/sample/2604-icici-savings-statement.csv", "utf8");
+  const rawCsv = await readFile("assets/sample/icici-savings-sample-01.csv", "utf8");
 
   const dashboard = await runIciciCsvImport(db, {
     accountDisplayName: "ICICI Savings UI Flow Test",
-    filename: "2604-icici-savings-statement.csv",
+    filename: "icici-savings-sample-01.csv",
     rawCsv
   });
 
-  expect(dashboard.importBatch.filename).toBe("2604-icici-savings-statement.csv");
+  expect(dashboard.importBatch.filename).toBe("icici-savings-sample-01.csv");
   expect(dashboard.tally.totalIncomingMinorUnits).toBeGreaterThan(0);
-  expect(dashboard.tally.differenceMinorUnits).toBe(400000);
+  expect(dashboard.tally.differenceMinorUnits).toBe(0);
   expect(dashboard.transactions.length).toBeGreaterThan(10);
   expect(dashboard.transactions[0]).toMatchObject({
-    transactionDate: "2026-04-02",
+    transactionDate: "2026-05-04",
     direction: "incoming",
-    amountMinorUnits: 14920000
+    amountMinorUnits: 2500000
   });
 });
 
 test("runs the full import flow idempotently when the same statement is re-imported", async () => {
-  const rawCsv = await readFile("assets/sample/2604-icici-savings-statement.csv", "utf8");
+  const rawCsv = await readFile("assets/sample/icici-savings-sample-01.csv", "utf8");
 
   const firstDashboard = await runIciciCsvImport(db, {
     accountDisplayName: "ICICI Savings Full Idempotency Test",
-    filename: "2604-icici-savings-statement.csv",
+    filename: "icici-savings-sample-01.csv",
     rawCsv
   });
   const secondDashboard = await runIciciCsvImport(db, {
     accountDisplayName: "ICICI Savings Full Idempotency Test",
-    filename: "2604-icici-savings-statement.csv",
+    filename: "icici-savings-sample-01.csv",
     rawCsv
   });
   const accountTransactions = await db
@@ -1002,7 +1002,7 @@ test("lists ledger months from active transaction dates with latest month first"
 
   const months = await getAvailableLedgerMonths(db);
 
-  expect(months.slice(0, 2)).toEqual(["2026-04", "2026-03"]);
+  expect(months.slice(0, 2)).toEqual(["2026-05", "2026-04"]);
 });
 
 test("computes a consolidated month tally across accounts including manual transactions", async () => {
@@ -1699,7 +1699,7 @@ test("rejects transaction category updates when the month is closed", async () =
 
 test("rejects imports when any parsed transaction month is closed", async () => {
   await closeMonth(db, {
-    month: "2026-04",
+    month: "2026-05",
     ownerUserId: "closed-month-import-user"
   });
 
@@ -1707,17 +1707,17 @@ test("rejects imports when any parsed transaction month is closed", async () => 
     runIciciCsvImport(db, {
       accountDisplayName: "Closed Month Import Account",
       filename: "closed-month.csv",
-      rawCsv: await readFile("assets/sample/2604-icici-savings-statement.csv", "utf8"),
+      rawCsv: await readFile("assets/sample/icici-savings-sample-01.csv", "utf8"),
       ownerUserId: "closed-month-import-user"
     })
   ).rejects.toThrow("Month is closed. Reopen before making changes.");
 });
 
 test("persists extracted statement metadata on the authenticated owner's account", async () => {
-  const rawCsv = await readFile("assets/sample/2604-icici-savings-statement.csv", "utf8");
+  const rawCsv = await readFile("assets/sample/icici-savings-sample-01.csv", "utf8");
   const dashboard = await runIciciCsvImport(db, {
     accountDisplayName: "Metadata Extraction Owner",
-    filename: "2604-icici-savings-statement.csv",
+    filename: "icici-savings-sample-01.csv",
     rawCsv,
     ownerUserId: "metadata-user"
   } as any);
@@ -1746,7 +1746,7 @@ test("reuses an existing account when the import name differs only by case", asy
   const dashboard = await runIciciCsvImport(db, {
     accountDisplayName: "primary account",
     filename: "case-insensitive-account.csv",
-    rawCsv: await readFile("assets/sample/2604-icici-savings-statement.csv", "utf8"),
+    rawCsv: await readFile("assets/sample/icici-savings-sample-01.csv", "utf8"),
     ownerUserId
   });
   const ownerAccounts = await getAccountManagementRows(db, ownerUserId);
