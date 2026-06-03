@@ -1,5 +1,5 @@
 import React from "react";
-import { Check, Database, LogOut, Power, ReceiptText, RotateCcw, UserCircle } from "lucide-react";
+import { Check, Power, RotateCcw } from "lucide-react";
 import { getMigratedDatabase } from "@/db/client";
 import {
   closeMonthAction,
@@ -17,6 +17,7 @@ import { MonthDashboard } from "@/modules/dashboard/DashboardLedger";
 import { isTransactionCategory } from "@/modules/classification/categories";
 import { AccountNameInput } from "@/modules/imports/AccountNameInput";
 import { ImportSubmitButton } from "@/modules/imports/ImportSubmitButton";
+import { SideNav } from "@/modules/navigation/SideNav";
 import {
   type ImportFileResult,
   parseImportResults
@@ -80,7 +81,7 @@ export default async function HomePage({ searchParams }: { searchParams: SearchP
   return (
     <main className="app-shell">
       <div className="app-frame">
-        <SideNav currentUser={currentUser} selectedView={selectedView} />
+        <SideNav currentUser={currentUser} logoutAction={logoutAction} selectedView={selectedView} />
         <div className="app-main">
           <Toasts error={params.error} importResults={parseImportResults(params.importResults)} success={params.success} />
           <header className="app-header">
@@ -115,43 +116,6 @@ export default async function HomePage({ searchParams }: { searchParams: SearchP
         </div>
       </div>
     </main>
-  );
-}
-
-function SideNav({
-  currentUser,
-  selectedView
-}: {
-  currentUser: Awaited<ReturnType<typeof getCurrentUser>>;
-  selectedView: "profile" | "transactions" | "metadata";
-}) {
-  return (
-    <aside className="side-nav" aria-label="Primary navigation">
-      <div className="side-nav-user">
-        <span>{currentUser?.displayName}</span>
-        <small>{currentUser?.email}</small>
-      </div>
-      <nav>
-        <a className={selectedView === "profile" ? "is-active" : ""} href="/?view=profile">
-          <UserCircle size={18} aria-hidden="true" />
-          User profile
-        </a>
-        <a className={selectedView === "transactions" ? "is-active" : ""} href="/">
-          <ReceiptText size={18} aria-hidden="true" />
-          Transactions
-        </a>
-        <a className={selectedView === "metadata" ? "is-active" : ""} href="/?view=metadata">
-          <Database size={18} aria-hidden="true" />
-          Metadata
-        </a>
-      </nav>
-      <form action={logoutAction}>
-        <button type="submit">
-          <LogOut size={18} aria-hidden="true" />
-          Logout
-        </button>
-      </form>
-    </aside>
   );
 }
 
