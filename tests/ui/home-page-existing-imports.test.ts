@@ -154,8 +154,13 @@ test("renders existing imported transactions when no import batch query is provi
   expect(html).toContain("Month view");
   expect(html).toContain("April 2026");
   expect(html).toContain("March 2026");
+  expect(html).toContain('class="import-disclosure"');
+  expect(html).toContain("<summary>Import statements</summary>");
+  expect(html).toContain("Upload all statement files");
+  expect(html).toContain('name="statements"');
   expect(html).toContain("existing-bank.csv");
   expect(html).toContain("APRIL SALARY CREDIT");
+  expect(html).not.toContain('class="import-panel"');
   expect(html).not.toContain("uploaded-without-tally.csv");
   expect(html).not.toContain("After import, this workspace shows");
 });
