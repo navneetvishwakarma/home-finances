@@ -23,6 +23,7 @@ export type TransactionCategorySource =
   | "manual"
   | "learned_rule"
   | "seed_rule"
+  | "ai"
   | "system_rule"
   | "uncategorized";
 

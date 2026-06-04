@@ -23,6 +23,9 @@ import {
   updateTransactionDetails
 } from "@/modules/imports/persistence";
 import { confirmTransfer, dismissTransfer } from "@/modules/transfers/persistence";
+import { createServerLogger } from "@/lib/server-logger";
+
+const logger = createServerLogger("app-actions");
 
 export async function importIciciStatement(formData: FormData) {
   const currentUser = await requireCurrentUser();
@@ -41,6 +44,7 @@ export async function importIciciStatement(formData: FormData) {
   }
 
   const results: ImportFileResult[] = [];
+  let aiClassificationFallback = false;
 
   const db = await getMigratedDatabase();
   for (const statement of statements) {
@@ -51,6 +55,7 @@ export async function importIciciStatement(formData: FormData) {
         filename: statement.name,
         rawCsv: await statement.text()
       });
+      aiClassificationFallback = aiClassificationFallback || Boolean(dashboard.aiClassificationFallback);
       const latestMonth = latestTransactionMonth(dashboard.transactions);
       if (dashboard.alreadyImported) {
         results.push({
@@ -73,15 +78,24 @@ export async function importIciciStatement(formData: FormData) {
         rowCount: dashboard.transactions.length
       });
     } catch (error) {
+      const mappedMessage = mapImportErrorMessage(error);
+      logger.error("import.file.failed", {
+        filename: statement.name,
+        contentType: statement.type || "unknown",
+        fileSizeBytes: statement.size,
+        mappedMessage,
+        error
+      });
       results.push({
         filename: statement.name,
         status: "error",
-        error: mapImportErrorMessage(error)
+        error: mappedMessage
       });
     }
   }
 
   const resultQuery = `importResults=${serializeImportResults(results)}`;
+  const classificationNoticeQuery = aiClassificationFallback ? "&classificationNotice=ai-fallback" : "";
   const processedMonths = results
     .filter((result): result is Extract<ImportFileResult, { status: "success" }> => result.status === "success")
     .map((result) => result.month);
@@ -92,7 +106,9 @@ export async function importIciciStatement(formData: FormData) {
   const latestImportedMonth = [...processedMonths, ...skippedMonths].sort((left, right) => right.localeCompare(left))[0];
 
   if (latestImportedMonth) {
-    redirect(`/?month=${latestImportedMonth}&success=Import%20processed&${resultQuery}`);
+    redirect(
+      `/?month=${latestImportedMonth}&success=Import%20processed&${resultQuery}${classificationNoticeQuery}`
+    );
   }
 
   redirect(`/?error=All%20files%20failed.%20See%20details.&${resultQuery}`);

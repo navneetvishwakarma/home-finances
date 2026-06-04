@@ -45,6 +45,7 @@ type SearchParams = Promise<{
   error?: string;
   success?: string;
   importResults?: string;
+  classificationNotice?: string;
   category?: string;
   view?: string;
 }>;
@@ -83,7 +84,12 @@ export default async function HomePage({ searchParams }: { searchParams: SearchP
       <div className="app-frame">
         <SideNav currentUser={currentUser} logoutAction={logoutAction} selectedView={selectedView} />
         <div className="app-main">
-          <Toasts error={params.error} importResults={parseImportResults(params.importResults)} success={params.success} />
+          <Toasts
+            classificationNotice={params.classificationNotice}
+            error={params.error}
+            importResults={parseImportResults(params.importResults)}
+            success={params.success}
+          />
           <header className="app-header">
             <div>
               <p className="eyebrow">FinState Command Centre</p>
@@ -120,21 +126,29 @@ export default async function HomePage({ searchParams }: { searchParams: SearchP
 }
 
 function Toasts({
+  classificationNotice,
   error,
   importResults,
   success
 }: {
+  classificationNotice?: string;
   error?: string;
   importResults: ImportFileResult[];
   success?: string;
 }) {
-  if (!error && !success && importResults.length === 0) {
+  const aiFallbackNotice =
+    classificationNotice === "ai-fallback"
+      ? "AI categorization unavailable. Defaulted to rule-based categorization."
+      : "";
+
+  if (!error && !success && !aiFallbackNotice && importResults.length === 0) {
     return null;
   }
 
   return (
     <div className="toast-stack" role="status" aria-live="polite">
       {success ? <p className="toast is-success">{success}</p> : null}
+      {aiFallbackNotice ? <p className="toast is-warning">{aiFallbackNotice}</p> : null}
       {error ? <p className="toast is-error">{error}</p> : null}
       {importResults.length > 0 ? (
         <ul className="import-result-list" aria-label="Import file results">

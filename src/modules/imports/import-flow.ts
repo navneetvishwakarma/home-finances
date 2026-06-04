@@ -45,21 +45,26 @@ export async function runIciciCsvImport(
     sourceProfileId: parsed.profileId
   });
   const alreadyImported = importBatch.alreadyImported;
+  let aiClassificationFallback = false;
 
   if (!alreadyImported) {
-    await persistParsedTransactions(db, {
+    const persistedTransactions = await persistParsedTransactions(db, {
       accountId: account.id,
       importBatchId: importBatch.id,
       sourceProfileId: parsed.profileId,
       rows: parsed.rows
     });
+    aiClassificationFallback = persistedTransactions.aiClassificationFallback;
     await computeStatementTally(db, {
       accountId: account.id,
       importBatchId: importBatch.id
     });
   }
 
-  return Object.assign(await getImportDashboard(db, importBatch.id, input.ownerUserId), { alreadyImported });
+  return Object.assign(await getImportDashboard(db, importBatch.id, input.ownerUserId), {
+    aiClassificationFallback,
+    alreadyImported
+  });
 }
 
 async function findOrCreateBankAccount(

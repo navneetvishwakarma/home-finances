@@ -604,6 +604,12 @@ select {
   background: var(--green-soft);
 }
 
+.toast.is-warning {
+  border: 1px solid rgba(146, 64, 14, 0.22);
+  color: #92400e;
+  background: #fffbeb;
+}
+
 .toast.is-error {
   border: 1px solid rgba(194, 65, 12, 0.28);
   color: var(--coral);

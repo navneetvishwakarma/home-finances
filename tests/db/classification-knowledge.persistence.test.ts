@@ -1,4 +1,5 @@
-import { afterAll, beforeAll, describe, expect, test } from "vitest";
+import { randomUUID } from "node:crypto";
+import { afterAll, afterEach, beforeAll, describe, expect, test, vi } from "vitest";
 import postgres from "postgres";
 import { drizzle } from "drizzle-orm/postgres-js";
 import { migrate } from "drizzle-orm/postgres-js/migrator";
@@ -44,6 +45,12 @@ describeDb("classification knowledge persistence", () => {
 
   afterAll(async () => {
     await client.end();
+  });
+
+  afterEach(() => {
+    delete process.env.GEMINI_API_KEY;
+    delete process.env.GEMINI_MODEL;
+    vi.unstubAllGlobals();
   });
 
   test("imports local labeled transaction datasets into examples and seed rules", async () => {
@@ -255,5 +262,235 @@ describeDb("classification knowledge persistence", () => {
         categorySource: "seed_rule"
       })
     );
+  });
+
+  test("uses AI import categorization for weak fallback rows and stores reusable AI rules", async () => {
+    process.env.GEMINI_API_KEY = "test-gemini-key";
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async () =>
+        new Response(
+          JSON.stringify({
+            candidates: [
+              {
+                content: {
+                  parts: [
+                    {
+                      text: JSON.stringify([
+                        { rowId: "row-1", merchantKeyword: "BIGBASKET", category: "food" }
+                      ])
+                    }
+                  ]
+                }
+              }
+            ]
+          }),
+          { status: 200 }
+        )
+      )
+    );
+    const account = await createAccount(db, {
+      displayName: "ICICI Savings AI Rule Test",
+      providerLabel: "ICICI Bank",
+      currency: "INR"
+    });
+    const importBatch = await createImportBatch(db, {
+      accountId: account.id,
+      sourceProfileId: "icici-bank-csv",
+      filename: "ai-rule.csv",
+      fileFingerprint: "sha256:ai-rule",
+      rawSource: "csv-content",
+      status: "uploaded"
+    });
+
+    const [transaction] = await persistParsedTransactions(db, {
+      accountId: account.id,
+      importBatchId: importBatch.id,
+      rows: [
+        {
+          valueDate: "2026-04-01",
+          transactionDate: "2026-04-01",
+          description: "UPI/BIGBASKET/ORDER123",
+          withdrawalAmount: "1200.00",
+          depositAmount: "0.00",
+          balance: "10000.00",
+          rawRow: {
+            "S No.": "1",
+            "Transaction Remarks": "UPI/BIGBASKET/ORDER123",
+            "Withdrawal Amount(INR)": "1200.00",
+            "Deposit Amount(INR)": "0.00",
+            "Balance(INR)": "10000.00"
+          }
+        }
+      ]
+    });
+    const rules = await db.select().from(classificationRules);
+
+    expect(transaction).toMatchObject({
+      category: "food",
+      categorySource: "ai"
+    });
+    expect(rules).toContainEqual(
+      expect.objectContaining({
+        pattern: "BIGBASKET",
+        category: "food",
+        source: "ai_import"
+      })
+    );
+
+    const secondImportBatch = await createImportBatch(db, {
+      accountId: account.id,
+      sourceProfileId: "icici-bank-csv",
+      filename: "ai-rule-reuse.csv",
+      fileFingerprint: "sha256:ai-rule-reuse",
+      rawSource: "csv-content",
+      status: "uploaded"
+    });
+    const [reusedTransaction] = await persistParsedTransactions(db, {
+      accountId: account.id,
+      importBatchId: secondImportBatch.id,
+      rows: [
+        {
+          valueDate: "2026-04-02",
+          transactionDate: "2026-04-02",
+          description: "UPI/BIGBASKET/ORDER999",
+          withdrawalAmount: "900.00",
+          depositAmount: "0.00",
+          balance: "9100.00",
+          rawRow: {
+            "S No.": "2",
+            "Transaction Remarks": "UPI/BIGBASKET/ORDER999",
+            "Withdrawal Amount(INR)": "900.00",
+            "Deposit Amount(INR)": "0.00"
+          }
+        }
+      ]
+    });
+
+    expect(reusedTransaction).toMatchObject({
+      category: "food",
+      categorySource: "ai"
+    });
+    expect(fetch).toHaveBeenCalledTimes(1);
+  });
+
+  test("keeps learned and seed rules ahead of AI import categorization", async () => {
+    process.env.GEMINI_API_KEY = "test-gemini-key";
+    vi.stubGlobal("fetch", vi.fn());
+    await db.insert(classificationRules).values([
+      {
+        id: randomUUID(),
+        pattern: "priority merchant learned",
+        category: "shopping",
+        source: "manual_override",
+        priority: 100
+      },
+      {
+        id: randomUUID(),
+        pattern: "priority merchant seed",
+        category: "education",
+        source: "seed_dataset",
+        priority: 50
+      }
+    ]);
+    const account = await createAccount(db, {
+      displayName: "ICICI Savings AI Priority Test",
+      providerLabel: "ICICI Bank",
+      currency: "INR"
+    });
+    const importBatch = await createImportBatch(db, {
+      accountId: account.id,
+      sourceProfileId: "icici-bank-csv",
+      filename: "ai-priority.csv",
+      fileFingerprint: "sha256:ai-priority",
+      rawSource: "csv-content",
+      status: "uploaded"
+    });
+
+    const persisted = await persistParsedTransactions(db, {
+      accountId: account.id,
+      importBatchId: importBatch.id,
+      rows: [
+        {
+          valueDate: "2026-04-01",
+          transactionDate: "2026-04-01",
+          description: "UPI PRIORITY MERCHANT LEARNED",
+          withdrawalAmount: "1200.00",
+          depositAmount: "0.00",
+          balance: "10000.00",
+          rawRow: { "S No.": "1", "Transaction Remarks": "UPI PRIORITY MERCHANT LEARNED" }
+        },
+        {
+          valueDate: "2026-04-02",
+          transactionDate: "2026-04-02",
+          description: "UPI PRIORITY MERCHANT SEED",
+          withdrawalAmount: "1300.00",
+          depositAmount: "0.00",
+          balance: "8700.00",
+          rawRow: { "S No.": "2", "Transaction Remarks": "UPI PRIORITY MERCHANT SEED" }
+        }
+      ]
+    });
+
+    expect(persisted).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          description: "UPI PRIORITY MERCHANT LEARNED",
+          category: "shopping",
+          categorySource: "learned_rule"
+        }),
+        expect.objectContaining({
+          description: "UPI PRIORITY MERCHANT SEED",
+          category: "education",
+          categorySource: "seed_rule"
+        })
+      ])
+    );
+    expect(fetch).not.toHaveBeenCalled();
+  });
+
+  test("persists rule-based categories when configured AI is unavailable", async () => {
+    process.env.GEMINI_API_KEY = "test-gemini-key";
+    vi.stubGlobal("fetch", vi.fn(async () => new Response("quota", { status: 429 })));
+    const account = await createAccount(db, {
+      displayName: "ICICI Savings AI Fallback Test",
+      providerLabel: "ICICI Bank",
+      currency: "INR"
+    });
+    const importBatch = await createImportBatch(db, {
+      accountId: account.id,
+      sourceProfileId: "icici-bank-csv",
+      filename: "ai-fallback.csv",
+      fileFingerprint: "sha256:ai-fallback",
+      rawSource: "csv-content",
+      status: "uploaded"
+    });
+
+    const persisted = await persistParsedTransactions(db, {
+      accountId: account.id,
+      importBatchId: importBatch.id,
+      rows: [
+        {
+          valueDate: "2026-04-01",
+          transactionDate: "2026-04-01",
+          description: "UPI AI FALLBACK MERCHANT",
+          withdrawalAmount: "1200.00",
+          depositAmount: "0.00",
+          balance: "10000.00",
+          rawRow: {
+            "S No.": "1",
+            "Transaction Remarks": "UPI AI FALLBACK MERCHANT",
+            "Withdrawal Amount(INR)": "1200.00",
+            "Deposit Amount(INR)": "0.00"
+          }
+        }
+      ]
+    });
+
+    expect(persisted[0]).toMatchObject({
+      category: "other",
+      categorySource: "system_rule"
+    });
+    expect(persisted.aiClassificationFallback).toBe(true);
   });
 });
