@@ -102,7 +102,7 @@ export async function classifyWithStoredRules(db: Db, description: string) {
   const normalizedText = normalizeTransactionText(description);
   const rules = await db.select().from(classificationRules);
   const matchedRule = rules
-    .filter((rule) => normalizedText.includes(rule.pattern))
+    .filter((rule) => normalizedText.includes(normalizeTransactionText(rule.pattern)))
     .sort(compareRules)[0];
 
   if (matchedRule) {
@@ -145,6 +145,29 @@ export async function learnManualClassificationRule(
   return rule;
 }
 
+export async function learnAiImportClassificationRule(
+  db: Db,
+  input: {
+    merchantKeyword: string;
+    category: TransactionCategory;
+  }
+) {
+  const pattern = input.merchantKeyword.trim().toUpperCase();
+
+  if (pattern.length < 2) {
+    return undefined;
+  }
+
+  const [rule] = await upsertClassificationRule(db, {
+    pattern,
+    category: input.category,
+    source: "ai_import",
+    priority: 25
+  });
+
+  return rule;
+}
+
 export async function backfillNonManualTransactions(db: Db) {
   const ledgerRows = await db.select().from(transactions);
 
@@ -170,7 +193,7 @@ async function upsertClassificationRule(
   input: {
     pattern: string;
     category: TransactionCategory;
-    source: "seed_dataset" | "manual_override" | "system";
+    source: "seed_dataset" | "manual_override" | "ai_import" | "system";
     priority: number;
   }
 ) {
@@ -230,6 +253,10 @@ function ruleSourceToCategorySource(source: string): TransactionCategorySource {
 
   if (source === "seed_dataset") {
     return "seed_rule";
+  }
+
+  if (source === "ai_import") {
+    return "ai";
   }
 
   return "system_rule";

@@ -199,6 +199,28 @@ test("renders structured multi-file import results in the toast stack", async ()
   expect(html).toContain("This file format is not supported.");
 });
 
+test("renders the AI categorization fallback notice in the toast stack", async () => {
+  const { getCurrentUser } = await import("@/modules/auth/session");
+  vi.mocked(getCurrentUser).mockResolvedValueOnce({
+    id: "user-1",
+    email: "admin@example.com",
+    displayName: "Admin User",
+    role: "admin",
+    active: true,
+    createdAt: new Date(),
+    updatedAt: new Date()
+  });
+  const { default: HomePage } = await import("@/app/page");
+  const page = await HomePage({
+    searchParams: Promise.resolve({
+      classificationNotice: "ai-fallback"
+    })
+  });
+  const html = renderToStaticMarkup(createElement(() => page));
+
+  expect(html).toContain("AI categorization unavailable. Defaulted to rule-based categorization.");
+});
+
 test("passes the category URL filter into month dashboard loading", async () => {
   const { getCurrentUser } = await import("@/modules/auth/session");
   const persistence = await import("@/modules/imports/persistence");

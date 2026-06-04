@@ -8,7 +8,13 @@ Set these environment variables in Vercel:
 DATABASE_URL=<Supabase Postgres connection string>
 NEXT_PUBLIC_SUPABASE_URL=<Supabase project URL>
 NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY=<Supabase publishable key>
+GEMINI_API_KEY=<Gemini API key>
+GEMINI_MODEL=gemini-3.1-flash-lite
+APP_LOG_LEVEL=info
 ```
+
+`GEMINI_API_KEY` enables AI-assisted import categorization. Leave it unset to use rule-based categorization only.
+`APP_LOG_LEVEL` controls structured server logs. Use `debug` locally for Gemini request outcome details, `info` in production, `error` during noisy incidents, or `off` to suppress application logs.
 
 Set the Vercel build command to:
 

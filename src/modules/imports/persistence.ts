@@ -6,10 +6,13 @@ import { accounts, importBatches, monthCloses, statementTallies, transactions, t
 import {
   categoryLabel,
   isTransactionCategory,
-  type TransactionCategory
+  type TransactionCategory,
+  type TransactionCategorySource
 } from "@/modules/classification/categories";
+import { classifyImportTransactionsWithAi } from "@/modules/classification/ai-import-classifier";
 import {
   classifyWithStoredRules,
+  learnAiImportClassificationRule,
   learnManualClassificationRule
 } from "@/modules/classification/persistence";
 import type { CanonicalParsedRow } from "@/modules/source-profiles/icici-bank-csv";
@@ -147,8 +150,8 @@ export async function persistParsedTransactions(
     rows: CanonicalParsedRow[];
   }
 ) {
-  const values = await Promise.all(
-    input.rows.map(async (row) => {
+  const preparedRows = await Promise.all(
+    input.rows.map(async (row, index) => {
       const direction = moneyToMinorUnits(row.depositAmount) > 0 ? "incoming" : "outgoing";
       const amount =
         direction === "incoming"
@@ -160,33 +163,61 @@ export async function persistParsedTransactions(
       const classification = await classifyWithStoredRules(db, row.description);
 
       return {
-        id: randomUUID(),
-        accountId: input.accountId,
-        importBatchId: input.importBatchId,
-        sourceType: "imported",
-        sourceRowId: sourceRowId(row.rawRow, rowHash),
-        transactionDate: row.transactionDate,
-        description: row.description,
-        originalDescription: row.description,
-        direction,
-        amountMinorUnits: amount,
-        runningBalanceMinorUnits: moneyToMinorUnits(row.balance),
-        category: classification.category,
-        categorySource: classification.categorySource,
-        sourceFingerprint: sourceFingerprint(input.sourceProfileId, rowHash),
-        globalRowFingerprint: globalRowFingerprint(input.sourceProfileId, {
+        rowId: `row-${index + 1}`,
+        classification,
+        value: {
+          id: randomUUID(),
+          accountId: input.accountId,
+          importBatchId: input.importBatchId,
+          sourceType: "imported",
+          sourceRowId: sourceRowId(row.rawRow, rowHash),
           transactionDate: row.transactionDate,
           description: row.description,
+          originalDescription: row.description,
           direction,
           amountMinorUnits: amount,
-          runningBalanceMinorUnits: moneyToMinorUnits(row.balance)
-        }),
-        rowHash,
-        rawSourcePayload: row.rawRow,
-        tags: []
+          runningBalanceMinorUnits: moneyToMinorUnits(row.balance),
+          category: classification.category,
+          categorySource: classification.categorySource,
+          sourceFingerprint: sourceFingerprint(input.sourceProfileId, rowHash),
+          globalRowFingerprint: globalRowFingerprint(input.sourceProfileId, {
+            transactionDate: row.transactionDate,
+            description: row.description,
+            direction,
+            amountMinorUnits: amount,
+            runningBalanceMinorUnits: moneyToMinorUnits(row.balance)
+          }),
+          rowHash,
+          rawSourcePayload: row.rawRow,
+          tags: []
+        }
       };
     })
   );
+  const aiCandidates = preparedRows
+    .filter((row) => isAiImportCandidate(row.classification))
+    .map((row) => ({
+      rowId: row.rowId,
+      description: row.value.description,
+      transactionDate: row.value.transactionDate,
+      direction: row.value.direction as "incoming" | "outgoing",
+      amountMinorUnits: row.value.amountMinorUnits
+    }));
+  const aiResult = await classifyImportTransactionsWithAi(aiCandidates);
+
+  for (const row of preparedRows) {
+    const aiClassification = aiResult.classifications.get(row.rowId);
+
+    if (!aiClassification || !isAiImportCandidate(row.classification)) {
+      continue;
+    }
+
+    row.value.category = aiClassification.category;
+    row.value.categorySource = "ai";
+    await learnAiImportClassificationRule(db, aiClassification);
+  }
+
+  const values = preparedRows.map((row) => row.value);
   const persistedTransactions = [];
   let skippedCount = 0;
 
@@ -230,7 +261,10 @@ export async function persistParsedTransactions(
     .set({ skippedRowCount: skippedCount })
     .where(eq(importBatches.id, input.importBatchId));
 
-  return Object.assign(persistedTransactions, { skippedCount });
+  return Object.assign(persistedTransactions, {
+    aiClassificationFallback: aiResult.status === "fallback",
+    skippedCount
+  });
 }
 
 export async function updateTransactionCategory(
@@ -544,6 +578,17 @@ function moneyToMinorUnits(value: string) {
   const normalized = value.replaceAll(",", "");
   const [whole, fraction = ""] = normalized.split(".");
   return Number(whole) * 100 + Number(fraction.padEnd(2, "0").slice(0, 2));
+}
+
+function isAiImportCandidate(classification: {
+  category: TransactionCategory;
+  categorySource: TransactionCategorySource;
+}) {
+  if (classification.categorySource === "uncategorized") {
+    return true;
+  }
+
+  return classification.categorySource === "system_rule" && ["other", "transfers"].includes(classification.category);
 }
 
 export async function computeStatementTally(

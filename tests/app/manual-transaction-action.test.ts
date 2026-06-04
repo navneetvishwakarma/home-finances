@@ -1,5 +1,7 @@
-import { beforeEach, expect, test, vi } from "vitest";
+import { afterEach, beforeEach, expect, test, vi } from "vitest";
 import { parseImportResults } from "@/modules/imports/import-results";
+
+const originalEnv = { ...process.env };
 
 const redirect = vi.fn((url: string) => {
   throw new Error(`REDIRECT:${url}`);
@@ -46,6 +48,7 @@ vi.mock("@/modules/imports/persistence", () => ({
 }));
 
 beforeEach(() => {
+  process.env = { ...originalEnv };
   redirect.mockClear();
   closeMonth.mockReset();
   createManualTransaction.mockReset();
@@ -54,6 +57,11 @@ beforeEach(() => {
   renameAccount.mockReset();
   reopenMonth.mockReset();
   runIciciCsvImport.mockReset();
+});
+
+afterEach(() => {
+  process.env = { ...originalEnv };
+  vi.restoreAllMocks();
 });
 
 test("closeMonthAction closes the selected month and redirects back to it", async () => {
@@ -256,6 +264,28 @@ test("importIciciStatement reports mixed per-file success and errors", async () 
   ]);
 });
 
+test("importIciciStatement includes an AI fallback notice when configured AI is unavailable", async () => {
+  runIciciCsvImport.mockResolvedValueOnce({
+    aiClassificationFallback: true,
+    importBatch: { skippedRowCount: 0 },
+    transactions: [{ transactionDate: "2026-04-30" }]
+  });
+  const { importIciciStatement } = await import("@/app/actions");
+
+  const redirectUrl = await redirectedUrl(
+    importIciciStatement(
+      formData({
+        accountDisplayName: "Primary account",
+        statements: new File(["csv"], "april.csv", { type: "text/csv" }) as any
+      })
+    )
+  );
+  const url = new URL(`http://localhost${redirectUrl}`);
+
+  expect(url.searchParams.get("month")).toBe("2026-04");
+  expect(url.searchParams.get("classificationNotice")).toBe("ai-fallback");
+});
+
 test("importIciciStatement redirects with all file errors when every file fails", async () => {
   runIciciCsvImport
     .mockRejectedValueOnce(new Error("Unsupported CSV headers"))
@@ -279,6 +309,42 @@ test("importIciciStatement redirects with all file errors when every file fails"
   expect(url.searchParams.get("error")).toBe("All files failed. See details.");
   expect(results.map((result) => result.filename)).toEqual(["bad.csv", "empty.csv"]);
   expect(results.every((result) => result.status === "error")).toBe(true);
+});
+
+test("importIciciStatement logs server diagnostics for failed file imports", async () => {
+  process.env.APP_LOG_LEVEL = "debug";
+  const errorSpy = vi.spyOn(console, "error").mockImplementation(() => {});
+  runIciciCsvImport.mockRejectedValueOnce(new Error("Unsupported CSV headers"));
+  const { importIciciStatement } = await import("@/app/actions");
+
+  const redirectUrl = await redirectedUrl(
+    importIciciStatement(
+      formData({
+        accountDisplayName: "Primary account",
+        statements: new File(["bad"], "bad.csv", { type: "text/csv" }) as any
+      })
+    )
+  );
+
+  expect(new URL(`http://localhost${redirectUrl}`).searchParams.get("error")).toBe("All files failed. See details.");
+  expect(errorSpy).toHaveBeenCalledTimes(1);
+
+  const payload = JSON.parse(String(errorSpy.mock.calls[0][0]));
+
+  expect(payload).toMatchObject({
+    level: "error",
+    logger: "app-actions",
+    message: "import.file.failed",
+    filename: "bad.csv",
+    contentType: "text/csv",
+    fileSizeBytes: 3,
+    mappedMessage:
+      "This file format is not supported. Supported: ICICI bank CSV, HDFC bank CSV, ICICI credit card CSV.",
+    error: {
+      name: "Error",
+      message: "Unsupported CSV headers"
+    }
+  });
 });
 
 async function redirectedUrl(promise: Promise<unknown>) {
