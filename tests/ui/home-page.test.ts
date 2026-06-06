@@ -33,6 +33,7 @@ vi.mock("@/modules/imports/persistence", () => ({
     note: null
   })),
   getCategoryBreakdown: vi.fn(async () => []),
+  getPendingStatementImport: vi.fn(async () => null),
   getAccountMetadataSummary: vi.fn(async () => ({
     accountCount: 2,
     sourceProfiles: ["icici-bank-csv", "hdfc-bank-csv"],
@@ -42,9 +43,12 @@ vi.mock("@/modules/imports/persistence", () => ({
         id: "account-1",
         displayName: "Primary account",
         providerLabel: "ICICI Bank",
+        providerType: "bank",
         accountType: "bank",
         currency: "INR",
         statementHolderName: "Admin User",
+        accountRefLast4: "1047",
+        linkedAccountRef: "XXXXXXXX1047",
         sourceProfiles: ["icici-bank-csv"],
         transactionCount: 12,
         lastImportedAt: new Date("2026-04-30T10:00:00.000Z"),
@@ -54,9 +58,12 @@ vi.mock("@/modules/imports/persistence", () => ({
         id: "account-2",
         displayName: "Closed card",
         providerLabel: "ICICI Bank",
+        providerType: "card_issuer",
         accountType: "card",
         currency: "INR",
         statementHolderName: null,
+        accountRefLast4: "7000",
+        linkedAccountRef: "4611XXXXXXXX7000",
         sourceProfiles: ["hdfc-bank-csv"],
         transactionCount: 4,
         lastImportedAt: null,
@@ -115,10 +122,8 @@ test("renders the MVP 1 upload entry point for authenticated users", async () =>
   expect(html).toContain("Month view");
   expect(html).toContain("Credit card coverage");
   expect(html).toContain("Supported sources");
-  expect(html).toContain("Account name");
-  expect(html).toContain('list="account-name-suggestions"');
-  expect(html).toContain('<datalist id="account-name-suggestions">');
-  expect(html).toContain('<option value="Primary account"></option>');
+  expect(html).not.toContain('name="accountDisplayName"');
+  expect(html).not.toContain('list="account-name-suggestions"');
   expect(html).toContain(".csv,text/csv,.txt,text/plain");
   expect(html).toContain("Import in progress");
   expect(html).toContain("Run import");
@@ -159,7 +164,13 @@ test("renders metadata view and success toast for authenticated users", async ()
   expect(html).toContain("Active");
   expect(html).toContain("Closed card");
   expect(html).toContain("Inactive");
-  expect(html).toContain('name="displayName"');
+  expect(html).toContain('name="accountName"');
+  expect(html).toContain('name="accountType"');
+  expect(html).toContain('name="providerType"');
+  expect(html).toContain('name="providerName"');
+  expect(html).toContain('name="accountHolderName"');
+  expect(html).toContain("Last 4");
+  expect(html).toContain("1047");
   expect(html).toContain('maxLength="80"');
   expect(html).not.toContain("Month cockpit");
 });
@@ -197,6 +208,58 @@ test("renders structured multi-file import results in the toast stack", async ()
   expect(html).toContain("Already imported");
   expect(html).toContain("file3.csv");
   expect(html).toContain("This file format is not supported.");
+});
+
+test("renders account metadata confirmation when an import is pending", async () => {
+  const { getCurrentUser } = await import("@/modules/auth/session");
+  const persistence = await import("@/modules/imports/persistence");
+  vi.mocked(getCurrentUser).mockResolvedValueOnce({
+    id: "user-1",
+    email: "admin@example.com",
+    displayName: "Admin User",
+    role: "admin",
+    active: true,
+    createdAt: new Date(),
+    updatedAt: new Date()
+  });
+  vi.mocked(persistence.getPendingStatementImport).mockResolvedValueOnce({
+    id: "pending-1",
+    filename: "icici-savings-sample-01.csv",
+    sourceProfileId: "icici-bank-csv",
+    metadata: {
+      accountHolderName: "NAVNEET KUMAR VISHWAKARMA",
+      accountName: "ICICI-UNK-1047",
+      accountRefLast4: "1047",
+      accountRefObfuscated: "XXXXXXXX1047",
+      accountType: "unknown",
+      currency: "INR",
+      metadataConfidence: "extracted",
+      metadataWarnings: ["Account type not captured in statement metadata."],
+      providerAbbreviation: "ICICI",
+      providerName: "ICICI Bank",
+      providerType: "bank"
+    }
+  });
+  const { default: HomePage } = await import("@/app/page");
+  const page = await HomePage({
+    searchParams: Promise.resolve({
+      pendingImportId: "pending-1"
+    })
+  });
+  const html = renderToStaticMarkup(createElement(() => page));
+
+  expect(html).toContain("Confirm account metadata");
+  expect(html).toContain("icici-savings-sample-01.csv");
+  expect(html).toContain('name="pendingImportId"');
+  expect(html).toContain('value="pending-1"');
+  expect(html).toContain('name="accountName"');
+  expect(html).toContain('value="ICICI-UNK-1047"');
+  expect(html).toContain('name="accountRef"');
+  expect(html).toContain('value="XXXXXXXX1047"');
+  expect(html).toContain('name="accountType"');
+  expect(html).toContain("Unknown");
+  expect(html).toContain("Account type not captured in statement metadata.");
+  expect(html).toContain("Confirm and import");
 });
 
 test("renders the AI categorization fallback notice in the toast stack", async () => {

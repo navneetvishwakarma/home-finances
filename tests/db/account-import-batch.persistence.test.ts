@@ -6,7 +6,16 @@ import { afterAll, beforeAll, describe, expect, test } from "vitest";
 import postgres from "postgres";
 import { drizzle } from "drizzle-orm/postgres-js";
 import { migrate } from "drizzle-orm/postgres-js/migrator";
-import { accounts, importBatches, monthCloses, statementTallies, transactions, transferMatches } from "@/db/schema";
+import {
+  accounts,
+  accountStatementTemplates,
+  importBatches,
+  monthCloses,
+  pendingStatementImports,
+  statementTallies,
+  transactions,
+  transferMatches
+} from "@/db/schema";
 import {
   computeStatementTally,
   createAccount,
@@ -16,6 +25,7 @@ import {
   persistParsedTransactions,
   reactivateAccount,
   renameAccount,
+  updateAccountMetadata,
   updateTransactionCategory,
   updateTransactionDetails,
   createManualTransaction,
@@ -29,11 +39,17 @@ import {
   getConsolidatedMonthTally,
   getMonthDashboards,
   getMonthCloseStatus,
+  getPendingStatementImport,
   reopenMonth,
   uploadIciciCsvForAccount
 } from "@/modules/imports/persistence";
 import { DashboardLedger } from "@/modules/dashboard/DashboardLedger";
-import { runIciciCsvImport } from "@/modules/imports/import-flow";
+import {
+  confirmPendingStatementImport,
+  prepareStatementImport,
+  runIciciCsvImport
+} from "@/modules/imports/import-flow";
+import { buildSourceAccountMetadata } from "@/modules/source-profiles/account-metadata";
 import { parseSourceCsv } from "@/modules/source-profiles/registry";
 import {
   confirmTransfer,
@@ -54,6 +70,8 @@ beforeAll(async () => {
   await db.delete(statementTallies);
   await db.delete(transactions);
   await db.delete(importBatches);
+  await db.delete(pendingStatementImports);
+  await db.delete(accountStatementTemplates);
   await db.delete(accounts);
 });
 
@@ -1730,8 +1748,274 @@ test("persists extracted statement metadata on the authenticated owner's account
     ownerUserId: "metadata-user",
     statementHolderName: "NAVNEET KUMAR VISHWAKARMA",
     institutionName: "ICICI Bank",
-    linkedAccountRef: "XXXXXXX11047"
+    linkedAccountRef: "XXXXXXXX1047"
   });
+});
+
+test("prepares first import for account metadata confirmation before persisting account transactions", async () => {
+  const ownerUserId = "account-confirmation-owner";
+  const rawCsv = await readFile("assets/sample/icici-savings-sample-01.csv", "utf8");
+
+  const prepared = await prepareStatementImport(db, {
+    filename: "icici-savings-sample-01.csv",
+    ownerUserId,
+    rawCsv
+  });
+  const ownerAccountsBeforeConfirmation = await db
+    .select()
+    .from(accounts)
+    .where(eq(accounts.ownerUserId, ownerUserId));
+
+  expect(prepared).toMatchObject({
+    status: "requires_confirmation",
+    metadata: {
+      accountHolderName: "NAVNEET KUMAR VISHWAKARMA",
+      accountName: "ICICI-UNK-1047",
+      accountRefLast4: "1047",
+      accountRefObfuscated: "XXXXXXXX1047",
+      accountType: "unknown",
+      providerName: "ICICI Bank",
+      providerType: "bank"
+    }
+  });
+  expect(ownerAccountsBeforeConfirmation).toHaveLength(0);
+
+  const dashboard = await confirmPendingStatementImport(db, {
+    ownerUserId,
+    pendingImportId: prepared.pendingImportId,
+    metadata: {
+      ...prepared.metadata,
+      accountType: "savings",
+      accountName: "ICICI-SAV-1047"
+    }
+  });
+  const [account] = await db
+    .select()
+    .from(accounts)
+    .where(eq(accounts.id, dashboard.importBatch?.accountId ?? ""));
+
+  expect(account).toMatchObject({
+    ownerUserId,
+    displayName: "ICICI-SAV-1047",
+    providerLabel: "ICICI Bank",
+    accountType: "savings",
+    statementHolderName: "NAVNEET KUMAR VISHWAKARMA",
+    institutionName: "ICICI Bank",
+    linkedAccountRef: "XXXXXXXX1047"
+  });
+  expect(dashboard.importBatch).toMatchObject({
+    accountId: account.id,
+    sourceProfileId: "icici-bank-csv",
+    filename: "icici-savings-sample-01.csv"
+  });
+  expect(dashboard.transactions).toHaveLength(62);
+});
+
+test("imports directly when statement metadata matches an existing confirmed account identity", async () => {
+  const ownerUserId = "confirmed-account-match-owner";
+  const rawCsv = await readFile("assets/sample/icici-savings-sample-01.csv", "utf8");
+  const account = await createAccount(db, {
+    ownerUserId,
+    displayName: "Custom savings name",
+    providerLabel: "ICICI Bank Ltd",
+    providerType: "bank",
+    providerAbbreviation: "ICICI",
+    currency: "INR",
+    accountType: "savings",
+    statementHolderName: "NAVNEET KUMAR VISHWAKARMA",
+    institutionName: "ICICI Bank",
+    linkedAccountRef: "XXXXXXXX1047",
+    accountRefLast4: "1047",
+    displayNameSource: "user",
+    metadataConfidence: "extracted",
+    metadataWarnings: []
+  });
+
+  const prepared = await prepareStatementImport(db, {
+    filename: "later-icici-savings.csv",
+    ownerUserId,
+    rawCsv
+  });
+  const ownerAccounts = await getAccountManagementRows(db, ownerUserId);
+
+  expect(prepared).toMatchObject({
+    status: "imported",
+    dashboard: {
+      importBatch: {
+        accountId: account.id,
+        sourceProfileId: "icici-bank-csv",
+        filename: "later-icici-savings.csv"
+      }
+    }
+  });
+  expect(ownerAccounts).toHaveLength(1);
+  expect(ownerAccounts[0]).toMatchObject({
+    id: account.id,
+    displayName: "Custom savings name"
+  });
+});
+
+test("confirmation rechecks month-close state before inserting pending import transactions", async () => {
+  const ownerUserId = "pending-confirmation-closed-month-owner";
+  const rawCsv = await readFile("assets/sample/icici-savings-sample-01.csv", "utf8");
+  const prepared = await prepareStatementImport(db, {
+    filename: "closed-after-prepare.csv",
+    ownerUserId,
+    rawCsv
+  });
+
+  expect(prepared).toMatchObject({
+    status: "requires_confirmation"
+  });
+
+  await closeMonth(db, {
+    month: "2026-05",
+    ownerUserId,
+    note: "Closed after pending import was created"
+  });
+
+  await expect(
+    confirmPendingStatementImport(db, {
+      ownerUserId,
+      pendingImportId: prepared.pendingImportId,
+      metadata: {
+        ...prepared.metadata,
+        accountType: "savings",
+        accountName: "ICICI-SAV-1047"
+      }
+    })
+  ).rejects.toThrow("Month is closed. Reopen before making changes.");
+
+  const persistedTransactions = await db
+    .select({ id: transactions.id })
+    .from(transactions)
+    .innerJoin(accounts, eq(transactions.accountId, accounts.id))
+    .where(eq(accounts.ownerUserId, ownerUserId));
+
+  expect(persistedTransactions).toHaveLength(0);
+});
+
+test("reuses a unique confirmed statement template when account reference is missing later", async () => {
+  const ownerUserId = "template-match-owner";
+  const rawCsv = removeIciciAccountNumber(await readFile("assets/sample/icici-savings-sample-01.csv", "utf8"));
+  const firstPrepared = await prepareStatementImport(db, {
+    filename: "missing-account-first.csv",
+    ownerUserId,
+    rawCsv
+  });
+
+  expect(firstPrepared).toMatchObject({
+    status: "requires_confirmation",
+    metadata: {
+      accountRefLast4: undefined
+    }
+  });
+
+  const firstDashboard = await confirmPendingStatementImport(db, {
+    ownerUserId,
+    pendingImportId: firstPrepared.pendingImportId,
+    metadata: {
+      ...buildSourceAccountMetadata({
+        accountHolderName: "NAVNEET KUMAR VISHWAKARMA",
+        accountRef: "046801511047",
+        accountType: "savings",
+        providerAbbreviation: "ICICI",
+        providerName: "ICICI Bank",
+        providerType: "bank"
+      }),
+      accountName: "ICICI-SAV-1047"
+    }
+  });
+  const secondPrepared = await prepareStatementImport(db, {
+    filename: "missing-account-second.csv",
+    ownerUserId,
+    rawCsv
+  });
+
+  expect(secondPrepared).toMatchObject({
+    status: "imported",
+    dashboard: {
+      importBatch: {
+        accountId: firstDashboard.importBatch?.accountId
+      }
+    }
+  });
+});
+
+test("requires confirmation when a missing-reference statement template is ambiguous", async () => {
+  const ownerUserId = "template-ambiguous-owner";
+  const rawCsv = removeIciciAccountNumber(await readFile("assets/sample/icici-savings-sample-01.csv", "utf8"));
+  const prepared = await prepareStatementImport(db, {
+    filename: "missing-account-1111.csv",
+    ownerUserId,
+    rawCsv
+  });
+  await confirmPendingStatementImport(db, {
+    ownerUserId,
+    pendingImportId: prepared.pendingImportId,
+    metadata: {
+      ...buildSourceAccountMetadata({
+        accountHolderName: "NAVNEET KUMAR VISHWAKARMA",
+        accountRef: "046801511111",
+        accountType: "savings",
+        providerAbbreviation: "ICICI",
+        providerName: "ICICI Bank",
+        providerType: "bank"
+      }),
+      accountName: "ICICI-SAV-1111"
+    }
+  });
+  const secondAccount = await createAccount(db, {
+    displayName: "ICICI-SAV-2222",
+    providerLabel: "ICICI Bank",
+    currency: "INR",
+    ownerUserId
+  });
+  await db.insert(accountStatementTemplates).values({
+    id: "22222222-2222-4222-8222-222222222222",
+    ownerUserId,
+    sourceProfileId: "icici-bank-csv",
+    accountId: secondAccount.id
+  });
+
+  const ambiguousPrepared = await prepareStatementImport(db, {
+    filename: "missing-account-ambiguous.csv",
+    ownerUserId,
+    rawCsv
+  });
+
+  expect(ambiguousPrepared).toMatchObject({
+    status: "requires_confirmation"
+  });
+});
+
+test("normalizes pending import metadata when stored JSON omits warnings", async () => {
+  const pendingImportId = "33333333-3333-4333-8333-333333333333";
+  const ownerUserId = "pending-metadata-normalization-owner";
+
+  await db.insert(pendingStatementImports).values({
+    id: pendingImportId,
+    ownerUserId,
+    sourceProfileId: "icici-bank-csv",
+    filename: "legacy-pending.csv",
+    rawSource: "legacy raw source",
+    extractedMetadata: {
+      accountName: "ICICI-UNK-1047",
+      accountRefLast4: "1047",
+      accountRefObfuscated: "XXXXXXXX1047",
+      accountType: "unknown",
+      currency: "INR",
+      metadataConfidence: "extracted",
+      providerAbbreviation: "ICICI",
+      providerName: "ICICI Bank",
+      providerType: "bank"
+    },
+    status: "pending"
+  });
+
+  const pendingImport = await getPendingStatementImport(db, pendingImportId, ownerUserId);
+
+  expect(pendingImport?.metadata.metadataWarnings).toEqual([]);
 });
 
 test("reuses an existing account when the import name differs only by case", async () => {
@@ -1779,6 +2063,76 @@ test("renames an owned account and rejects owner mismatches", async () => {
   ).rejects.toThrow("Account not found");
 });
 
+test("updates editable account metadata for an owned account", async () => {
+  const account = await createAccount(db, {
+    displayName: "Original account metadata",
+    providerLabel: "ICICI Bank",
+    providerType: "bank",
+    providerAbbreviation: "ICICI",
+    currency: "INR",
+    accountType: "unknown",
+    statementHolderName: "Not captured",
+    ownerUserId: "account-metadata-edit-owner"
+  });
+
+  const updated = await updateAccountMetadata(db, {
+    accountId: account.id,
+    ownerUserId: "account-metadata-edit-owner",
+    accountName: "ICICI-SAV-1047",
+    accountType: "savings",
+    providerType: "bank",
+    providerName: "ICICI Bank Ltd",
+    accountHolderName: "NAVNEET KUMAR VISHWAKARMA"
+  });
+
+  expect(updated).toMatchObject({
+    id: account.id,
+    displayName: "ICICI-SAV-1047",
+    accountType: "savings",
+    providerType: "bank",
+    providerLabel: "ICICI Bank Ltd",
+    institutionName: "ICICI Bank Ltd",
+    statementHolderName: "NAVNEET KUMAR VISHWAKARMA",
+    displayNameSource: "user",
+    metadataConfidence: "user_provided"
+  });
+  await expect(
+    updateAccountMetadata(db, {
+      accountId: account.id,
+      ownerUserId: "other-owner",
+      accountName: "Intruder",
+      accountType: "current",
+      providerType: "bank",
+      providerName: "Other",
+      accountHolderName: "Other"
+    })
+  ).rejects.toThrow("Account not found");
+});
+
+test("normalizes legacy editable account type values before storing metadata", async () => {
+  const account = await createAccount(db, {
+    displayName: "Legacy selectable account type",
+    providerLabel: "ICICI Bank",
+    providerType: "bank",
+    providerAbbreviation: "ICICI",
+    currency: "INR",
+    accountType: "savings",
+    ownerUserId: "account-metadata-type-owner"
+  });
+
+  const updated = await updateAccountMetadata(db, {
+    accountId: account.id,
+    ownerUserId: "account-metadata-type-owner",
+    accountName: "ICICI account",
+    accountType: "bank",
+    providerType: "bank",
+    providerName: "ICICI Bank",
+    accountHolderName: ""
+  });
+
+  expect(updated.accountType).toBe("unknown");
+});
+
 test("deactivates and reactivates an account while preserving historical month views", async () => {
   const ownerUserId = "account-active-owner";
   const account = await createAccount(db, {
@@ -1822,3 +2176,10 @@ test("deactivates and reactivates an account while preserving historical month v
   expect(reactivatedAccount.active).toBe(true);
 });
 });
+
+function removeIciciAccountNumber(rawCsv: string) {
+  return rawCsv.replace(
+    "046801511047 ( INR )  - NAVNEET KUMAR VISHWAKARMA",
+    "NA"
+  );
+}

@@ -48,6 +48,9 @@ BEGIN
   WHERE account."id" = import_batch."account_id"
     AND account."owner_user_id" = target_owner_user_id;
 
+  DELETE FROM public."pending_statement_imports"
+  WHERE "owner_user_id" = target_owner_user_id;
+
   DELETE FROM public."month_closes"
   WHERE "owner_user_id" = target_owner_user_id;
 

@@ -4,7 +4,12 @@ import { redirect } from "next/navigation";
 import { getMigratedDatabase } from "@/db/client";
 import { requireCurrentUser } from "@/modules/auth/session";
 import { createServerSupabaseClient } from "@/modules/auth/supabase";
-import { runIciciCsvImport } from "@/modules/imports/import-flow";
+import {
+  confirmPendingStatementImport,
+  prepareStatementImport
+} from "@/modules/imports/import-flow";
+import { buildSourceAccountMetadata } from "@/modules/source-profiles/account-metadata";
+import type { AccountType, ProviderType } from "@/modules/source-profiles/account-metadata";
 import {
   type ImportFileResult,
   mapImportErrorMessage,
@@ -19,6 +24,7 @@ import {
   reactivateAccount,
   renameAccount,
   reopenMonth,
+  updateAccountMetadata,
   updateTransactionCategory,
   updateTransactionDetails
 } from "@/modules/imports/persistence";
@@ -29,7 +35,6 @@ const logger = createServerLogger("app-actions");
 
 export async function importIciciStatement(formData: FormData) {
   const currentUser = await requireCurrentUser();
-  const accountDisplayName = String(formData.get("accountDisplayName") || "Primary account").trim();
   const statements = formData
     .getAll("statements")
     .filter((value): value is File => value instanceof File && value.size > 0);
@@ -45,16 +50,30 @@ export async function importIciciStatement(formData: FormData) {
 
   const results: ImportFileResult[] = [];
   let aiClassificationFallback = false;
+  let pendingConfirmationRedirect = "";
 
   const db = await getMigratedDatabase();
-  for (const statement of statements) {
+  for (const [statementIndex, statement] of statements.entries()) {
     try {
-      const dashboard = await runIciciCsvImport(db, {
+      const prepared = await prepareStatementImport(db, {
         ownerUserId: currentUser.id,
-        accountDisplayName,
         filename: statement.name,
         rawCsv: await statement.text()
       });
+      if (prepared.status === "requires_confirmation") {
+        for (const remainingStatement of statements.slice(statementIndex + 1)) {
+          results.push({
+            filename: remainingStatement.name,
+            status: "error",
+            error: "Not processed because another file requires account confirmation."
+          });
+        }
+        const resultQuery = results.length > 0 ? `&importResults=${serializeImportResults(results)}` : "";
+        pendingConfirmationRedirect = `/?pendingImportId=${encodeURIComponent(prepared.pendingImportId)}&success=Confirm%20account%20metadata%20to%20finish%20import${resultQuery}`;
+        break;
+      }
+
+      const dashboard = prepared.dashboard;
       aiClassificationFallback = aiClassificationFallback || Boolean(dashboard.aiClassificationFallback);
       const latestMonth = latestTransactionMonth(dashboard.transactions);
       if (dashboard.alreadyImported) {
@@ -94,6 +113,10 @@ export async function importIciciStatement(formData: FormData) {
     }
   }
 
+  if (pendingConfirmationRedirect) {
+    redirect(pendingConfirmationRedirect);
+  }
+
   const resultQuery = `importResults=${serializeImportResults(results)}`;
   const classificationNoticeQuery = aiClassificationFallback ? "&classificationNotice=ai-fallback" : "";
   const processedMonths = results
@@ -112,6 +135,67 @@ export async function importIciciStatement(formData: FormData) {
   }
 
   redirect(`/?error=All%20files%20failed.%20See%20details.&${resultQuery}`);
+}
+
+export async function confirmPendingStatementImportAction(formData: FormData) {
+  const currentUser = await requireCurrentUser();
+  const pendingImportId = String(formData.get("pendingImportId") || "");
+  const accountName = String(formData.get("accountName") || "").trim();
+  const accountRef = String(formData.get("accountRef") || "").trim();
+  const accountType = normalizedAccountType(String(formData.get("accountType") || "unknown"));
+  const providerType = normalizedProviderType(String(formData.get("providerType") || "unknown"));
+  const providerName = String(formData.get("providerName") || "").trim();
+  const providerAbbreviation = String(formData.get("providerAbbreviation") || "").trim();
+  const accountHolderName = String(formData.get("accountHolderName") || "").trim();
+  const currency = String(formData.get("currency") || "INR").trim() || "INR";
+  let redirectTarget = "/?success=Import%20processed";
+
+  try {
+    if (!pendingImportId) {
+      throw new Error("Pending import is required");
+    }
+
+    if (!accountName) {
+      throw new Error("Account name is required");
+    }
+
+    if (!accountRef) {
+      throw new Error("Account number is required");
+    }
+
+    if (!providerName) {
+      throw new Error("Provider name is required");
+    }
+
+    const db = await getMigratedDatabase();
+    const metadata = {
+      ...buildSourceAccountMetadata({
+        accountHolderName: accountHolderName || undefined,
+        accountRef,
+        accountType,
+        currency,
+        providerAbbreviation: providerAbbreviation || providerName,
+        providerName,
+        providerType
+      }),
+      accountName
+    };
+    const dashboard = await confirmPendingStatementImport(db, {
+      ownerUserId: currentUser.id,
+      pendingImportId,
+      metadata
+    });
+    const latestMonth = latestTransactionMonth(dashboard.transactions);
+
+    if (latestMonth) {
+      redirectTarget = `/?month=${latestMonth}&success=Import%20processed`;
+    }
+  } catch (error) {
+    const message = error instanceof Error ? error.message : "Account metadata confirmation failed";
+    redirect(`/?pendingImportId=${encodeURIComponent(pendingImportId)}&error=${encodeURIComponent(message)}`);
+  }
+
+  redirect(redirectTarget);
 }
 
 export async function loginAction(formData: FormData) {
@@ -247,6 +331,34 @@ export async function renameAccountAction(formData: FormData) {
   }
 
   redirect("/?view=metadata&success=Account%20renamed");
+}
+
+export async function updateAccountMetadataAction(formData: FormData) {
+  const currentUser = await requireCurrentUser();
+  const accountId = String(formData.get("accountId") || "");
+  const accountName = String(formData.get("accountName") || "").trim();
+  const accountType = normalizedAccountType(String(formData.get("accountType") || "unknown"));
+  const providerType = normalizedProviderType(String(formData.get("providerType") || "unknown"));
+  const providerName = String(formData.get("providerName") || "").trim();
+  const accountHolderName = String(formData.get("accountHolderName") || "").trim();
+
+  try {
+    const db = await getMigratedDatabase();
+    await updateAccountMetadata(db, {
+      accountId,
+      ownerUserId: currentUser.id,
+      accountName,
+      accountType,
+      providerType,
+      providerName,
+      accountHolderName
+    });
+  } catch (error) {
+    const message = error instanceof Error ? error.message : "Account metadata update failed";
+    redirect(`/?view=metadata&error=${encodeURIComponent(message)}`);
+  }
+
+  redirect("/?view=metadata&success=Account%20metadata%20updated");
 }
 
 export async function deactivateAccountAction(formData: FormData) {
@@ -486,4 +598,20 @@ function latestTransactionMonth(transactions: Array<{ transactionDate: string }>
   return transactions
     .map((transaction) => transaction.transactionDate.slice(0, 7))
     .sort((left, right) => right.localeCompare(left))[0];
+}
+
+function normalizedAccountType(value: string): AccountType {
+  if (["savings", "current", "credit_card", "wallet", "unknown"].includes(value)) {
+    return value as AccountType;
+  }
+
+  return "unknown";
+}
+
+function normalizedProviderType(value: string): ProviderType {
+  if (["bank", "card_issuer", "wallet", "unknown"].includes(value)) {
+    return value as ProviderType;
+  }
+
+  return "unknown";
 }

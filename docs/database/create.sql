@@ -10,12 +10,39 @@ CREATE TABLE IF NOT EXISTS "accounts" (
   "owner_user_id" text NOT NULL DEFAULT 'legacy-local-user',
   "display_name" text NOT NULL,
   "provider_label" text NOT NULL,
+  "provider_type" text NOT NULL DEFAULT 'bank',
+  "provider_abbreviation" text,
   "currency" text NOT NULL,
   "statement_holder_name" text,
   "institution_name" text,
   "linked_account_ref" text,
+  "account_ref_last4" text,
+  "display_name_source" text NOT NULL DEFAULT 'user',
+  "metadata_confidence" text NOT NULL DEFAULT 'defaulted',
+  "metadata_warnings" jsonb NOT NULL DEFAULT '[]'::jsonb,
   "active" boolean NOT NULL DEFAULT true,
   "created_at" timestamp with time zone NOT NULL DEFAULT now()
+);
+
+CREATE TABLE IF NOT EXISTS "pending_statement_imports" (
+  "id" uuid PRIMARY KEY NOT NULL,
+  "owner_user_id" text NOT NULL,
+  "source_profile_id" text NOT NULL,
+  "filename" text NOT NULL,
+  "raw_source" text NOT NULL,
+  "extracted_metadata" jsonb NOT NULL,
+  "status" text NOT NULL DEFAULT 'pending',
+  "created_at" timestamp with time zone NOT NULL DEFAULT now(),
+  "confirmed_at" timestamp with time zone
+);
+
+CREATE TABLE IF NOT EXISTS "account_statement_templates" (
+  "id" uuid PRIMARY KEY NOT NULL,
+  "owner_user_id" text NOT NULL,
+  "source_profile_id" text NOT NULL,
+  "account_id" uuid NOT NULL REFERENCES "accounts"("id"),
+  "created_at" timestamp with time zone NOT NULL DEFAULT now(),
+  CONSTRAINT "account_statement_templates_account_source_unique" UNIQUE("owner_user_id", "source_profile_id", "account_id")
 );
 
 CREATE TABLE IF NOT EXISTS "app_users" (

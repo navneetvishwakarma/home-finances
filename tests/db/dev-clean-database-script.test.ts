@@ -16,6 +16,8 @@ type SeedIds = {
   transferMatchId: string;
   statementTallyId: string;
   monthCloseId: string;
+  statementTemplateId: string;
+  pendingImportId: string;
 };
 
 const target = seedIds("10000000");
@@ -46,6 +48,7 @@ describeDb("dev database cleanup scripts", () => {
       },
       async () => {
         await expect(rowCount("accounts", target.accountId)).resolves.toBe(1);
+        await expect(rowCount("account_statement_templates", target.statementTemplateId)).resolves.toBe(0);
         await expect(rowCount("app_users", target.userId)).resolves.toBe(1);
         await expect(rowCount("user_sessions", target.sessionId)).resolves.toBe(1);
         await expect(rowCount("transfer_matches", target.transferMatchId)).resolves.toBe(0);
@@ -53,6 +56,7 @@ describeDb("dev database cleanup scripts", () => {
         await expect(rowCount("transactions", target.outgoingTransactionId)).resolves.toBe(0);
         await expect(rowCount("transactions", target.incomingTransactionId)).resolves.toBe(0);
         await expect(rowCount("import_batches", target.importBatchId)).resolves.toBe(0);
+        await expect(rowCount("pending_statement_imports", target.pendingImportId)).resolves.toBe(0);
         await expect(rowCount("classification_examples", exampleId)).resolves.toBe(0);
         await expect(rowCount("classification_datasets", datasetId)).resolves.toBe(0);
         await expect(rowCount("classification_rules", ruleId)).resolves.toBe(0);
@@ -72,6 +76,7 @@ describeDb("dev database cleanup scripts", () => {
       },
       async () => {
         await expect(rowCount("accounts", target.accountId)).resolves.toBe(0);
+        await expect(rowCount("account_statement_templates", target.statementTemplateId)).resolves.toBe(0);
         await expect(rowCount("app_users", target.userId)).resolves.toBe(0);
         await expect(rowCount("user_sessions", target.sessionId)).resolves.toBe(0);
         await expect(rowCount("auth.dev_cleanup_login_traces", target.userId)).resolves.toBe(0);
@@ -80,6 +85,7 @@ describeDb("dev database cleanup scripts", () => {
         await expect(rowCount("transactions", target.outgoingTransactionId)).resolves.toBe(0);
         await expect(rowCount("transactions", target.incomingTransactionId)).resolves.toBe(0);
         await expect(rowCount("import_batches", target.importBatchId)).resolves.toBe(0);
+        await expect(rowCount("pending_statement_imports", target.pendingImportId)).resolves.toBe(0);
         await expect(rowCount("classification_examples", exampleId)).resolves.toBe(0);
         await expect(rowCount("classification_datasets", datasetId)).resolves.toBe(0);
         await expect(rowCount("classification_rules", ruleId)).resolves.toBe(0);
@@ -99,6 +105,7 @@ describeDb("dev database cleanup scripts", () => {
       },
       async () => {
         await expect(rowCount("accounts", target.accountId)).resolves.toBe(1);
+        await expect(rowCount("account_statement_templates", target.statementTemplateId)).resolves.toBe(1);
         await expect(rowCount("app_users", target.userId)).resolves.toBe(1);
         await expect(rowCount("user_sessions", target.sessionId)).resolves.toBe(1);
         await expect(rowCount("transfer_matches", target.transferMatchId)).resolves.toBe(0);
@@ -106,9 +113,11 @@ describeDb("dev database cleanup scripts", () => {
         await expect(rowCount("transactions", target.outgoingTransactionId)).resolves.toBe(0);
         await expect(rowCount("transactions", target.incomingTransactionId)).resolves.toBe(0);
         await expect(rowCount("import_batches", target.importBatchId)).resolves.toBe(0);
+        await expect(rowCount("pending_statement_imports", target.pendingImportId)).resolves.toBe(0);
         await expect(rowCount("classification_memories", memoryId)).resolves.toBe(0);
         await expect(rowCount("month_closes", target.monthCloseId)).resolves.toBe(0);
         await expect(rowCount("accounts", other.accountId)).resolves.toBe(1);
+        await expect(rowCount("account_statement_templates", other.statementTemplateId)).resolves.toBe(1);
         await expect(rowCount("transactions", other.outgoingTransactionId)).resolves.toBe(1);
         await expect(rowCount("transactions", other.incomingTransactionId)).resolves.toBe(1);
         await expect(rowCount("import_batches", other.importBatchId)).resolves.toBe(1);
@@ -128,6 +137,7 @@ describeDb("dev database cleanup scripts", () => {
       },
       async () => {
         await expect(rowCount("accounts", target.accountId)).resolves.toBe(0);
+        await expect(rowCount("account_statement_templates", target.statementTemplateId)).resolves.toBe(0);
         await expect(rowCount("app_users", target.userId)).resolves.toBe(1);
         await expect(rowCount("user_sessions", target.sessionId)).resolves.toBe(1);
         await expect(rowCount("transfer_matches", target.transferMatchId)).resolves.toBe(0);
@@ -135,9 +145,11 @@ describeDb("dev database cleanup scripts", () => {
         await expect(rowCount("transactions", target.outgoingTransactionId)).resolves.toBe(0);
         await expect(rowCount("transactions", target.incomingTransactionId)).resolves.toBe(0);
         await expect(rowCount("import_batches", target.importBatchId)).resolves.toBe(0);
+        await expect(rowCount("pending_statement_imports", target.pendingImportId)).resolves.toBe(0);
         await expect(rowCount("classification_memories", memoryId)).resolves.toBe(0);
         await expect(rowCount("month_closes", target.monthCloseId)).resolves.toBe(0);
         await expect(rowCount("accounts", other.accountId)).resolves.toBe(1);
+        await expect(rowCount("account_statement_templates", other.statementTemplateId)).resolves.toBe(1);
         await expect(rowCount("transactions", other.outgoingTransactionId)).resolves.toBe(1);
         await expect(rowCount("transactions", other.incomingTransactionId)).resolves.toBe(1);
         await expect(rowCount("import_batches", other.importBatchId)).resolves.toBe(1);
@@ -227,6 +239,38 @@ describeDb("dev database cleanup scripts", () => {
         ${`sha256:${ids.importBatchId}`},
         'raw',
         'uploaded'
+      )
+    `;
+    await sql`
+      INSERT INTO account_statement_templates (
+        id,
+        owner_user_id,
+        source_profile_id,
+        account_id
+      )
+      VALUES (
+        ${ids.statementTemplateId},
+        ${ids.userId},
+        'icici-bank-csv',
+        ${ids.accountId}
+      )
+    `;
+    await sql`
+      INSERT INTO pending_statement_imports (
+        id,
+        owner_user_id,
+        source_profile_id,
+        filename,
+        raw_source,
+        extracted_metadata
+      )
+      VALUES (
+        ${ids.pendingImportId},
+        ${ids.userId},
+        'icici-bank-csv',
+        ${`${ids.userId}-pending.csv`},
+        'raw',
+        '{}'
       )
     `;
     await sql`
@@ -441,7 +485,9 @@ function seedIds(prefix: string): SeedIds {
     incomingTransactionId: `${prefix}-0000-4000-8000-000000000006`,
     transferMatchId: `${prefix}-0000-4000-8000-000000000007`,
     statementTallyId: `${prefix}-0000-4000-8000-000000000008`,
-    monthCloseId: `${prefix}-0000-4000-8000-000000000009`
+    monthCloseId: `${prefix}-0000-4000-8000-000000000009`,
+    statementTemplateId: `${prefix}-0000-4000-8000-000000000010`,
+    pendingImportId: `${prefix}-0000-4000-8000-000000000011`
   };
 }
 

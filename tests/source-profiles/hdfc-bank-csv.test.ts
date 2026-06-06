@@ -9,6 +9,19 @@ test("parses HDFC savings delimited text statements into canonical rows", async 
 
   expect(result.profileId).toBe("hdfc-bank-csv");
   expect(result.rows).toHaveLength(30);
+  expect(result.metadata).toEqual({
+    accountHolderName: "MR. NAVNEET KUMAR VISHWAKARMA",
+    accountName: "HDFC-UNK-0502",
+    accountRefLast4: "0502",
+    accountRefObfuscated: "XXXXXXXXXX0502",
+    accountType: "unknown",
+    currency: "INR",
+    metadataConfidence: "extracted",
+    metadataWarnings: ["Account type not captured in statement metadata."],
+    providerAbbreviation: "HDFC",
+    providerName: "HDFC Bank",
+    providerType: "bank"
+  });
   expect(result.rows[0]).toMatchObject({
     valueDate: "2026-05-02",
     transactionDate: "2026-05-02",

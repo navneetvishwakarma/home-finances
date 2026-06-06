@@ -6,13 +6,51 @@ export const accounts = pgTable("accounts", {
   ownerUserId: text("owner_user_id").notNull().default("legacy-local-user"),
   displayName: text("display_name").notNull(),
   providerLabel: text("provider_label").notNull(),
+  providerType: text("provider_type").notNull().default("bank"),
+  providerAbbreviation: text("provider_abbreviation"),
   currency: text("currency").notNull(),
   statementHolderName: text("statement_holder_name"),
   institutionName: text("institution_name"),
   linkedAccountRef: text("linked_account_ref"),
+  accountRefLast4: text("account_ref_last4"),
+  displayNameSource: text("display_name_source").notNull().default("user"),
+  metadataConfidence: text("metadata_confidence").notNull().default("defaulted"),
+  metadataWarnings: jsonb("metadata_warnings").notNull().default([]),
   active: boolean("active").notNull().default(true),
   createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow()
 });
+
+export const pendingStatementImports = pgTable("pending_statement_imports", {
+  id: uuid("id").primaryKey(),
+  ownerUserId: text("owner_user_id").notNull(),
+  sourceProfileId: text("source_profile_id").notNull(),
+  filename: text("filename").notNull(),
+  rawSource: text("raw_source").notNull(),
+  extractedMetadata: jsonb("extracted_metadata").notNull(),
+  status: text("status").notNull().default("pending"),
+  createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+  confirmedAt: timestamp("confirmed_at", { withTimezone: true })
+});
+
+export const accountStatementTemplates = pgTable(
+  "account_statement_templates",
+  {
+    id: uuid("id").primaryKey(),
+    ownerUserId: text("owner_user_id").notNull(),
+    sourceProfileId: text("source_profile_id").notNull(),
+    accountId: uuid("account_id")
+      .notNull()
+      .references(() => accounts.id),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow()
+  },
+  (table) => ({
+    accountSourceUnique: unique("account_statement_templates_account_source_unique").on(
+      table.ownerUserId,
+      table.sourceProfileId,
+      table.accountId
+    )
+  })
+);
 
 export const importBatches = pgTable(
   "import_batches",

@@ -1,4 +1,5 @@
 import { parseCsvRecords } from "./csv";
+import { buildSourceAccountMetadata } from "./account-metadata";
 import type { CanonicalParsedRow } from "./icici-bank-csv";
 
 const ICICI_CREDIT_CARD_HEADERS = [
@@ -22,6 +23,21 @@ export const iciciCreditCardCsvProfile = {
   id: "icici-credit-card-csv",
   detect(headers: string[]) {
     return isDetailedStatementHeaders(headers) || isCurrentStatementHeaders(headers);
+  },
+  metadata(rawCsv: string) {
+    const records = parseCsvRecords(rawCsv);
+    const flattened = records.flat().map((value) => value.trim()).filter(Boolean);
+    const cardRef = flattened.find((value) => /^\d{4}[X*]+\d{4}$/.test(value));
+    const customerName = valueAfterLabel(records, "Customer Name:") ?? valueAfterLabel(records, "Card Holder Name");
+
+    return buildSourceAccountMetadata({
+      accountHolderName: customerName,
+      accountRef: cardRef,
+      accountType: "credit_card",
+      providerAbbreviation: "ICICI",
+      providerName: "ICICI Bank",
+      providerType: "card_issuer"
+    });
   },
   parse(rawCsv: string, headerIndex: number): CanonicalParsedRow[] {
     const records = parseCsvRecords(rawCsv);
@@ -138,4 +154,22 @@ function parseSignedAmount(value: string) {
     amount: match[1],
     sign: match[2] as "Dr" | "Cr"
   };
+}
+
+function valueAfterLabel(records: string[][], label: string) {
+  for (const record of records) {
+    const labelIndex = record.findIndex((value) => value.trim() === label);
+
+    if (labelIndex === -1) {
+      continue;
+    }
+
+    const value = record.slice(labelIndex + 1).find((candidate) => candidate.trim() !== "");
+
+    if (value) {
+      return value.trim().replace(/\s+/g, " ");
+    }
+  }
+
+  return undefined;
 }

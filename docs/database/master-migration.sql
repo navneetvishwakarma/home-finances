@@ -422,3 +422,40 @@ CREATE TABLE IF NOT EXISTS "classification_memories" (
 --> statement-breakpoint
 CREATE INDEX IF NOT EXISTS "classification_memories_normalized_text_idx"
   ON "classification_memories" ("normalized_text");
+
+
+-- ============================================================================
+-- Source: drizzle/0015_account_metadata_confirmation.sql
+-- ============================================================================
+
+ALTER TABLE "accounts" ADD COLUMN "provider_type" text NOT NULL DEFAULT 'bank';
+ALTER TABLE "accounts" ADD COLUMN "provider_abbreviation" text;
+ALTER TABLE "accounts" ADD COLUMN "account_ref_last4" text;
+ALTER TABLE "accounts" ADD COLUMN "display_name_source" text NOT NULL DEFAULT 'user';
+ALTER TABLE "accounts" ADD COLUMN "metadata_confidence" text NOT NULL DEFAULT 'defaulted';
+ALTER TABLE "accounts" ADD COLUMN "metadata_warnings" jsonb NOT NULL DEFAULT '[]'::jsonb;
+CREATE TABLE IF NOT EXISTS "pending_statement_imports" (
+  "id" uuid PRIMARY KEY NOT NULL,
+  "owner_user_id" text NOT NULL,
+  "source_profile_id" text NOT NULL,
+  "filename" text NOT NULL,
+  "raw_source" text NOT NULL,
+  "extracted_metadata" jsonb NOT NULL,
+  "status" text NOT NULL DEFAULT 'pending',
+  "created_at" timestamp with time zone NOT NULL DEFAULT now(),
+  "confirmed_at" timestamp with time zone
+);
+
+
+-- ============================================================================
+-- Source: drizzle/0016_statement_template_account_matching.sql
+-- ============================================================================
+
+CREATE TABLE IF NOT EXISTS "account_statement_templates" (
+  "id" uuid PRIMARY KEY NOT NULL,
+  "owner_user_id" text NOT NULL,
+  "source_profile_id" text NOT NULL,
+  "account_id" uuid NOT NULL REFERENCES "accounts"("id"),
+  "created_at" timestamp with time zone NOT NULL DEFAULT now(),
+  CONSTRAINT "account_statement_templates_account_source_unique" UNIQUE("owner_user_id", "source_profile_id", "account_id")
+);
