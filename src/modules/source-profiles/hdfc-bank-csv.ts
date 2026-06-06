@@ -1,4 +1,5 @@
 import { parseCsvRecords } from "./csv";
+import { buildSourceAccountMetadata } from "./account-metadata";
 import type { CanonicalParsedRow } from "./icici-bank-csv";
 
 const HDFC_HEADER_ALIASES = {
@@ -17,6 +18,23 @@ export const hdfcBankCsvProfile = {
     return Object.values(HDFC_HEADER_ALIASES).every((aliases) =>
       aliases.some((header) => headers.includes(header))
     );
+  },
+  metadata(rawCsv: string) {
+    const records = parseCsvRecords(rawCsv);
+    const accountRef = records.flat().find((value) => /Account No\s*:\s*\d+/.test(value));
+    const accountMatch = accountRef?.match(/Account No\s*:\s*(\d+)/);
+    const holder = records
+      .flat()
+      .map(normalizeWhitespace)
+      .find((value) => /^(MR\.|MRS\.|MS\.|DR\.)\s+/.test(value));
+
+    return buildSourceAccountMetadata({
+      accountHolderName: holder,
+      accountRef: accountMatch ? obfuscateAccountRef(accountMatch[1]) : undefined,
+      providerAbbreviation: "HDFC",
+      providerName: "HDFC Bank",
+      providerType: "bank"
+    });
   },
   parse(rawCsv: string, headerIndex: number): CanonicalParsedRow[] {
     const records = parseCsvRecords(rawCsv);
@@ -63,4 +81,13 @@ function parseHdfcDate(value: string) {
 
 function amountOrZero(value: string) {
   return value === "" ? "0.00" : value;
+}
+
+function normalizeWhitespace(value: string) {
+  return value.trim().replace(/\s+/g, " ");
+}
+
+function obfuscateAccountRef(value: string) {
+  const visibleDigits = value.slice(-4);
+  return `${"X".repeat(Math.max(value.length - visibleDigits.length, 0))}${visibleDigits}`;
 }

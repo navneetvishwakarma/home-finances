@@ -5,17 +5,17 @@ import {
   closeMonthAction,
   deactivateAccountAction,
   importIciciStatement,
+  confirmPendingStatementImportAction,
   loginAction,
   logoutAction,
   reactivateAccountAction,
-  renameAccountAction,
   reopenMonthAction,
-  signupAction
+  signupAction,
+  updateAccountMetadataAction
 } from "@/app/actions";
 import { getCurrentUser } from "@/modules/auth/session";
 import { MonthDashboard } from "@/modules/dashboard/DashboardLedger";
 import { isTransactionCategory } from "@/modules/classification/categories";
-import { AccountNameInput } from "@/modules/imports/AccountNameInput";
 import { ImportSubmitButton } from "@/modules/imports/ImportSubmitButton";
 import { SideNav } from "@/modules/navigation/SideNav";
 import {
@@ -32,6 +32,7 @@ import {
   getLatestImportDashboards,
   getMonthDashboards,
   getMonthCloseStatus,
+  getPendingStatementImport,
   isCompleteImportDashboard
 } from "@/modules/imports/persistence";
 import { detectTransferCandidates } from "@/modules/transfers/persistence";
@@ -48,6 +49,7 @@ type SearchParams = Promise<{
   classificationNotice?: string;
   category?: string;
   view?: string;
+  pendingImportId?: string;
 }>;
 
 export default async function HomePage({ searchParams }: { searchParams: SearchParams }) {
@@ -78,6 +80,9 @@ export default async function HomePage({ searchParams }: { searchParams: SearchP
   const transferCandidates = loadedView.transferCandidates;
   const dashboards = loadedDashboards.filter(isCompleteImportDashboard);
   const accountMetadata = await loadMetadataSummary(currentUser.id).catch(emptyMetadataSummary);
+  const pendingImport = params.pendingImportId
+    ? await loadPendingStatementImport(params.pendingImportId, currentUser.id).catch(() => null)
+    : null;
 
   return (
     <main className="app-shell">
@@ -108,7 +113,6 @@ export default async function HomePage({ searchParams }: { searchParams: SearchP
             <MetadataView summary={accountMetadata} />
           ) : (
             <TransactionsView
-              activeAccountNames={accountMetadata.activeAccountNames}
               availableMonths={availableMonths}
               categoryBreakdown={categoryBreakdown}
               consolidatedTally={consolidatedTally}
@@ -116,6 +120,7 @@ export default async function HomePage({ searchParams }: { searchParams: SearchP
               monthCloseStatus={monthCloseStatus}
               selectedCategory={selectedCategory}
               selectedMonth={selectedMonth}
+              pendingImport={pendingImport}
               transferCandidates={transferCandidates}
             />
           )}
@@ -165,7 +170,6 @@ function Toasts({
 }
 
 function TransactionsView({
-  activeAccountNames,
   availableMonths,
   categoryBreakdown,
   consolidatedTally,
@@ -173,14 +177,15 @@ function TransactionsView({
   monthCloseStatus,
   selectedCategory,
   selectedMonth,
+  pendingImport,
   transferCandidates
 }: {
-  activeAccountNames: string[];
   availableMonths: string[];
   categoryBreakdown: Awaited<ReturnType<typeof getCategoryBreakdown>>;
   consolidatedTally: Awaited<ReturnType<typeof getConsolidatedMonthTally>> | null;
   dashboards: CompleteImportDashboard[];
   monthCloseStatus: Awaited<ReturnType<typeof getMonthCloseStatus>> | null;
+  pendingImport: Awaited<ReturnType<typeof getPendingStatementImport>> | null;
   selectedCategory: string;
   selectedMonth: string;
   transferCandidates: Awaited<ReturnType<typeof detectTransferCandidates>>;
@@ -194,12 +199,12 @@ function TransactionsView({
         <details className="import-disclosure">
           <summary>Import statements</summary>
           <div className="import-disclosure-body">
-            <ImportWorkspace activeAccountNames={activeAccountNames} defaultMonth={selectedMonth || undefined} />
+            <ImportWorkspace defaultMonth={selectedMonth || undefined} pendingImport={pendingImport} />
           </div>
         </details>
       ) : (
         <aside className="import-panel">
-          <ImportWorkspace activeAccountNames={activeAccountNames} />
+          <ImportWorkspace pendingImport={pendingImport} />
         </aside>
       )}
 
@@ -269,14 +274,15 @@ function TransactionsView({
 }
 
 function ImportWorkspace({
-  activeAccountNames,
-  defaultMonth = "2026-04"
+  defaultMonth = "2026-04",
+  pendingImport = null
 }: {
-  activeAccountNames: string[];
   defaultMonth?: string;
+  pendingImport?: Awaited<ReturnType<typeof getPendingStatementImport>> | null;
 }) {
   return (
     <>
+      {pendingImport ? <AccountMetadataConfirmation pendingImport={pendingImport} /> : null}
       <div className="panel-heading">
         <p className="section-kicker">Month-close intake</p>
         <h2>Upload all statement files</h2>
@@ -293,10 +299,6 @@ function ImportWorkspace({
           <select defaultValue="auto" aria-label="Source profile">
             <option value="auto">Auto-detect supported profile</option>
           </select>
-        </label>
-        <label className="field">
-          <span>Account name</span>
-          <AccountNameInput activeAccountNames={activeAccountNames} />
         </label>
         <label className="field">
           <span>Statement files</span>
@@ -319,6 +321,74 @@ function ImportWorkspace({
         </ul>
       </section>
     </>
+  );
+}
+
+function AccountMetadataConfirmation({
+  pendingImport
+}: {
+  pendingImport: NonNullable<Awaited<ReturnType<typeof getPendingStatementImport>>>;
+}) {
+  return (
+    <section className="account-confirmation" aria-labelledby="account-confirmation-heading">
+      <p className="section-kicker">Statement identity</p>
+      <h2 id="account-confirmation-heading">Confirm account metadata</h2>
+      <p>{pendingImport.filename}</p>
+      <form action={confirmPendingStatementImportAction}>
+        <input type="hidden" name="pendingImportId" value={pendingImport.id} />
+        <input type="hidden" name="providerAbbreviation" value={pendingImport.metadata.providerAbbreviation} />
+        <input type="hidden" name="currency" value={pendingImport.metadata.currency} />
+        <label className="field">
+          <span>Account name</span>
+          <input name="accountName" defaultValue={pendingImport.metadata.accountName} required maxLength={80} />
+        </label>
+        <label className="field">
+          <span>Account number</span>
+          <input
+            name="accountRef"
+            defaultValue={pendingImport.metadata.accountRefObfuscated ?? ""}
+            required
+          />
+        </label>
+        <label className="field">
+          <span>Account type</span>
+          <select name="accountType" defaultValue={pendingImport.metadata.accountType}>
+            <option value="unknown">Unknown</option>
+            <option value="savings">Savings</option>
+            <option value="current">Current</option>
+            <option value="credit_card">Credit card</option>
+            <option value="wallet">Wallet</option>
+          </select>
+        </label>
+        <label className="field">
+          <span>Provider type</span>
+          <select name="providerType" defaultValue={pendingImport.metadata.providerType}>
+            <option value="bank">Bank</option>
+            <option value="card_issuer">Card issuer</option>
+            <option value="wallet">Wallet</option>
+            <option value="unknown">Unknown</option>
+          </select>
+        </label>
+        <label className="field">
+          <span>Provider name</span>
+          <input name="providerName" defaultValue={pendingImport.metadata.providerName} required />
+        </label>
+        <label className="field">
+          <span>Account holder name</span>
+          <input name="accountHolderName" defaultValue={pendingImport.metadata.accountHolderName ?? ""} />
+        </label>
+        {pendingImport.metadata.metadataWarnings.length > 0 ? (
+          <ul className="metadata-list">
+            {pendingImport.metadata.metadataWarnings.map((warning) => (
+              <li key={warning}>{warning}</li>
+            ))}
+          </ul>
+        ) : null}
+        <button className="primary-action" type="submit">
+          Confirm and import
+        </button>
+      </form>
+    </section>
   );
 }
 
@@ -375,11 +445,40 @@ function MetadataView({ summary }: { summary: AccountMetadataSummary }) {
             {summary.accounts.map((account) => (
               <article className="account-row" key={account.id}>
                 <div className="account-row-main">
-                  <form action={renameAccountAction} className="account-rename-form">
+                  <form action={updateAccountMetadataAction} className="account-rename-form">
                     <input type="hidden" name="accountId" value={account.id} />
                     <label>
-                      <span>Display name</span>
-                      <input name="displayName" defaultValue={account.displayName} required maxLength={80} />
+                      <span>Account name</span>
+                      <input name="accountName" defaultValue={account.displayName} required maxLength={80} />
+                    </label>
+                    <label>
+                      <span>Account type</span>
+                      <select name="accountType" defaultValue={account.accountType}>
+                        <option value="unknown">Unknown</option>
+                        <option value="savings">Savings</option>
+                        <option value="current">Current</option>
+                        <option value="credit_card">Credit card</option>
+                        <option value="wallet">Wallet</option>
+                        <option value="bank">Bank</option>
+                        <option value="card">Card</option>
+                      </select>
+                    </label>
+                    <label>
+                      <span>Provider type</span>
+                      <select name="providerType" defaultValue={account.providerType}>
+                        <option value="bank">Bank</option>
+                        <option value="card_issuer">Card issuer</option>
+                        <option value="wallet">Wallet</option>
+                        <option value="unknown">Unknown</option>
+                      </select>
+                    </label>
+                    <label>
+                      <span>Provider name</span>
+                      <input name="providerName" defaultValue={account.providerLabel} required />
+                    </label>
+                    <label>
+                      <span>Account holder name</span>
+                      <input name="accountHolderName" defaultValue={account.statementHolderName ?? ""} />
                     </label>
                     <button type="submit" aria-label={`Rename ${account.displayName}`} title="Save name">
                       <Check size={16} aria-hidden="true" />
@@ -391,8 +490,16 @@ function MetadataView({ summary }: { summary: AccountMetadataSummary }) {
                       <dd>{account.providerLabel}</dd>
                     </div>
                     <div>
+                      <dt>Provider type</dt>
+                      <dd>{account.providerType}</dd>
+                    </div>
+                    <div>
                       <dt>Type</dt>
                       <dd>{account.accountType}</dd>
+                    </div>
+                    <div>
+                      <dt>Last 4</dt>
+                      <dd>{account.accountRefLast4 ?? "Not captured"}</dd>
                     </div>
                     <div>
                       <dt>Currency</dt>
@@ -546,6 +653,11 @@ async function loadMonthView(params: Awaited<SearchParams>, ownerUserId: string)
 async function loadMetadataSummary(ownerUserId: string) {
   const db = await getMigratedDatabase();
   return getAccountMetadataSummary(db, ownerUserId);
+}
+
+async function loadPendingStatementImport(pendingImportId: string, ownerUserId: string) {
+  const db = await getMigratedDatabase();
+  return getPendingStatementImport(db, pendingImportId, ownerUserId);
 }
 
 function emptyMonthView() {

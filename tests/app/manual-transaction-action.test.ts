@@ -12,7 +12,9 @@ const deactivateAccount = vi.fn();
 const reactivateAccount = vi.fn();
 const renameAccount = vi.fn();
 const reopenMonth = vi.fn();
-const runIciciCsvImport = vi.fn();
+const updateAccountMetadata = vi.fn();
+const prepareStatementImport = vi.fn();
+const confirmPendingStatementImport = vi.fn();
 
 vi.mock("next/navigation", () => ({
   redirect
@@ -31,7 +33,8 @@ vi.mock("@/modules/auth/supabase", () => ({
 }));
 
 vi.mock("@/modules/imports/import-flow", () => ({
-  runIciciCsvImport
+  confirmPendingStatementImport,
+  prepareStatementImport
 }));
 
 vi.mock("@/modules/imports/persistence", () => ({
@@ -43,6 +46,7 @@ vi.mock("@/modules/imports/persistence", () => ({
   reactivateAccount,
   renameAccount,
   reopenMonth,
+  updateAccountMetadata,
   updateTransactionCategory: vi.fn(),
   updateTransactionDetails: vi.fn()
 }));
@@ -56,7 +60,9 @@ beforeEach(() => {
   reactivateAccount.mockReset();
   renameAccount.mockReset();
   reopenMonth.mockReset();
-  runIciciCsvImport.mockReset();
+  updateAccountMetadata.mockReset();
+  prepareStatementImport.mockReset();
+  confirmPendingStatementImport.mockReset();
 });
 
 afterEach(() => {
@@ -170,6 +176,63 @@ test("renameAccountAction rejects invalid names", async () => {
   expect(renameAccount).not.toHaveBeenCalled();
 });
 
+test("updateAccountMetadataAction updates editable account metadata", async () => {
+  updateAccountMetadata.mockResolvedValueOnce({ id: "account-1" });
+  const { updateAccountMetadataAction } = await import("@/app/actions");
+
+  await expect(
+    updateAccountMetadataAction(
+      formData({
+        accountId: "account-1",
+        accountName: "ICICI-SAV-1047",
+        accountType: "savings",
+        providerType: "bank",
+        providerName: "ICICI Bank",
+        accountHolderName: "NAVNEET KUMAR VISHWAKARMA"
+      })
+    )
+  ).rejects.toThrow("REDIRECT:/?view=metadata&success=Account%20metadata%20updated");
+
+  expect(updateAccountMetadata).toHaveBeenCalledWith(
+    { db: true },
+    {
+      accountId: "account-1",
+      ownerUserId: "user-1",
+      accountName: "ICICI-SAV-1047",
+      accountType: "savings",
+      providerType: "bank",
+      providerName: "ICICI Bank",
+      accountHolderName: "NAVNEET KUMAR VISHWAKARMA"
+    }
+  );
+});
+
+test("updateAccountMetadataAction normalizes legacy account type form values", async () => {
+  updateAccountMetadata.mockResolvedValueOnce({ id: "account-1" });
+  const { updateAccountMetadataAction } = await import("@/app/actions");
+
+  await expect(
+    updateAccountMetadataAction(
+      formData({
+        accountId: "account-1",
+        accountName: "ICICI account",
+        accountType: "bank",
+        providerType: "bank",
+        providerName: "ICICI Bank",
+        accountHolderName: "NAVNEET KUMAR VISHWAKARMA"
+      })
+    )
+  ).rejects.toThrow("REDIRECT:/?view=metadata&success=Account%20metadata%20updated");
+
+  expect(updateAccountMetadata).toHaveBeenCalledWith(
+    { db: true },
+    expect.objectContaining({
+      accountType: "unknown",
+      providerType: "bank"
+    })
+  );
+});
+
 test("deactivateAccountAction and reactivateAccountAction toggle account status", async () => {
   deactivateAccount.mockResolvedValueOnce({ id: "account-1", active: false });
   reactivateAccount.mockResolvedValueOnce({ id: "account-1", active: true });
@@ -199,16 +262,19 @@ test("deactivateAccountAction and reactivateAccountAction toggle account status"
 });
 
 test("importIciciStatement includes skipped duplicate rows in the success redirect", async () => {
-  runIciciCsvImport.mockResolvedValueOnce({
-    alreadyImported: true,
-    importBatch: {
-      skippedRowCount: 3
-    },
-    transactions: [
-      {
-        transactionDate: "2026-04-30"
-      }
-    ]
+  prepareStatementImport.mockResolvedValueOnce({
+    status: "imported",
+    dashboard: {
+      alreadyImported: true,
+      importBatch: {
+        skippedRowCount: 3
+      },
+      transactions: [
+        {
+          transactionDate: "2026-04-30"
+        }
+      ]
+    }
   });
   const { importIciciStatement } = await import("@/app/actions");
 
@@ -225,15 +291,21 @@ test("importIciciStatement includes skipped duplicate rows in the success redire
 });
 
 test("importIciciStatement reports mixed per-file success and errors", async () => {
-  runIciciCsvImport
+  prepareStatementImport
     .mockResolvedValueOnce({
-      importBatch: { skippedRowCount: 0 },
-      transactions: [{ transactionDate: "2026-04-30" }, { transactionDate: "2026-04-29" }]
+      status: "imported",
+      dashboard: {
+        importBatch: { skippedRowCount: 0 },
+        transactions: [{ transactionDate: "2026-04-30" }, { transactionDate: "2026-04-29" }]
+      }
     })
     .mockRejectedValueOnce(new Error("Unsupported CSV headers"))
     .mockResolvedValueOnce({
-      importBatch: { skippedRowCount: 0 },
-      transactions: [{ transactionDate: "2026-05-01" }]
+      status: "imported",
+      dashboard: {
+        importBatch: { skippedRowCount: 0 },
+        transactions: [{ transactionDate: "2026-05-01" }]
+      }
     });
   const { importIciciStatement } = await import("@/app/actions");
 
@@ -265,10 +337,13 @@ test("importIciciStatement reports mixed per-file success and errors", async () 
 });
 
 test("importIciciStatement includes an AI fallback notice when configured AI is unavailable", async () => {
-  runIciciCsvImport.mockResolvedValueOnce({
-    aiClassificationFallback: true,
-    importBatch: { skippedRowCount: 0 },
-    transactions: [{ transactionDate: "2026-04-30" }]
+  prepareStatementImport.mockResolvedValueOnce({
+    status: "imported",
+    dashboard: {
+      aiClassificationFallback: true,
+      importBatch: { skippedRowCount: 0 },
+      transactions: [{ transactionDate: "2026-04-30" }]
+    }
   });
   const { importIciciStatement } = await import("@/app/actions");
 
@@ -287,7 +362,7 @@ test("importIciciStatement includes an AI fallback notice when configured AI is 
 });
 
 test("importIciciStatement redirects with all file errors when every file fails", async () => {
-  runIciciCsvImport
+  prepareStatementImport
     .mockRejectedValueOnce(new Error("Unsupported CSV headers"))
     .mockRejectedValueOnce(new Error("File contains no transactions."));
   const { importIciciStatement } = await import("@/app/actions");
@@ -314,7 +389,7 @@ test("importIciciStatement redirects with all file errors when every file fails"
 test("importIciciStatement logs server diagnostics for failed file imports", async () => {
   process.env.APP_LOG_LEVEL = "debug";
   const errorSpy = vi.spyOn(console, "error").mockImplementation(() => {});
-  runIciciCsvImport.mockRejectedValueOnce(new Error("Unsupported CSV headers"));
+  prepareStatementImport.mockRejectedValueOnce(new Error("Unsupported CSV headers"));
   const { importIciciStatement } = await import("@/app/actions");
 
   const redirectUrl = await redirectedUrl(
@@ -345,6 +420,96 @@ test("importIciciStatement logs server diagnostics for failed file imports", asy
       message: "Unsupported CSV headers"
     }
   });
+});
+
+test("importIciciStatement redirects to account metadata confirmation when first import needs review", async () => {
+  prepareStatementImport.mockResolvedValueOnce({
+    status: "requires_confirmation",
+    pendingImportId: "pending-1",
+    metadata: {
+      accountName: "ICICI-UNK-1047"
+    }
+  });
+  const { importIciciStatement } = await import("@/app/actions");
+
+  await expect(
+    importIciciStatement(
+      formData({
+        statements: new File(["csv"], "first.csv", { type: "text/csv" }) as any
+      })
+    )
+  ).rejects.toThrow(
+    "REDIRECT:/?pendingImportId=pending-1&success=Confirm%20account%20metadata%20to%20finish%20import"
+  );
+});
+
+test("importIciciStatement reports later files as unprocessed when confirmation interrupts a multi-file upload", async () => {
+  prepareStatementImport
+    .mockResolvedValueOnce({
+      status: "imported",
+      dashboard: {
+        importBatch: { skippedRowCount: 0 },
+        transactions: [{ transactionDate: "2026-04-30" }]
+      }
+    })
+    .mockResolvedValueOnce({
+      status: "requires_confirmation",
+      pendingImportId: "pending-2",
+      metadata: {
+        accountName: "ICICI-UNK-1047"
+      }
+    });
+  const { importIciciStatement } = await import("@/app/actions");
+
+  const redirectUrl = await redirectedUrl(
+    importIciciStatement(
+      formData({
+        statements: [
+          new File(["csv"], "april.csv", { type: "text/csv" }) as any,
+          new File(["csv"], "needs-confirmation.csv", { type: "text/csv" }) as any,
+          new File(["csv"], "may.csv", { type: "text/csv" }) as any
+        ]
+      })
+    )
+  );
+  const url = new URL(`http://localhost${redirectUrl}`);
+  const results = parseImportResults(url.searchParams.get("importResults") ?? "");
+
+  expect(url.searchParams.get("pendingImportId")).toBe("pending-2");
+  expect(prepareStatementImport).toHaveBeenCalledTimes(2);
+  expect(results).toEqual([
+    { filename: "april.csv", status: "success", month: "2026-04", rowCount: 1 },
+    {
+      filename: "may.csv",
+      status: "error",
+      error: "Not processed because another file requires account confirmation."
+    }
+  ]);
+});
+
+test("confirmPendingStatementImportAction encodes pending import ids in error redirects", async () => {
+  confirmPendingStatementImport.mockRejectedValueOnce(new Error("invalid input syntax for type uuid"));
+  const { confirmPendingStatementImportAction } = await import("@/app/actions");
+
+  const redirectUrl = await redirectedUrl(
+    confirmPendingStatementImportAction(
+      formData({
+        pendingImportId: "abc&view=metadata",
+        accountName: "ICICI-SAV-1047",
+        accountRef: "046801511047",
+        accountType: "savings",
+        providerType: "bank",
+        providerName: "ICICI Bank",
+        providerAbbreviation: "ICICI",
+        accountHolderName: "NAVNEET KUMAR VISHWAKARMA"
+      })
+    )
+  );
+  const url = new URL(`http://localhost${redirectUrl}`);
+
+  expect(url.searchParams.get("pendingImportId")).toBe("abc&view=metadata");
+  expect(url.searchParams.get("view")).toBeNull();
+  expect(url.searchParams.get("error")).toBe("invalid input syntax for type uuid");
 });
 
 async function redirectedUrl(promise: Promise<unknown>) {

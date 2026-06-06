@@ -11,8 +11,16 @@ test("selects the ICICI CSV profile and returns canonical parsed rows", async ()
   expect(result.rows).toHaveLength(62);
   expect(result.metadata).toEqual({
     accountHolderName: "NAVNEET KUMAR VISHWAKARMA",
-    institutionName: "ICICI Bank",
-    linkedAccountRef: "XXXXXXX11047"
+    accountName: "ICICI-UNK-1047",
+    accountRefLast4: "1047",
+    accountRefObfuscated: "XXXXXXXX1047",
+    accountType: "unknown",
+    currency: "INR",
+    metadataConfidence: "extracted",
+    metadataWarnings: ["Account type not captured in statement metadata."],
+    providerAbbreviation: "ICICI",
+    providerName: "ICICI Bank",
+    providerType: "bank"
   });
   expect(result.rows[0]).toMatchObject({
     transactionDate: "2026-05-04",

@@ -10,6 +10,19 @@ test("parses ICICI credit card statements into canonical rows", async () => {
 
   expect(result.profileId).toBe("icici-credit-card-csv");
   expect(result.rows).toHaveLength(40);
+  expect(result.metadata).toEqual({
+    accountHolderName: "Mr NAVNEET KUMAR VISHWAKARMA",
+    accountName: "ICICI-CC-7000",
+    accountRefLast4: "7000",
+    accountRefObfuscated: "4611XXXXXXXX7000",
+    accountType: "credit_card",
+    currency: "INR",
+    metadataConfidence: "extracted",
+    metadataWarnings: [],
+    providerAbbreviation: "ICICI",
+    providerName: "ICICI Bank",
+    providerType: "card_issuer"
+  });
   expect(result.rows[0]).toMatchObject({
     valueDate: "2026-04-19",
     transactionDate: "2026-04-19",

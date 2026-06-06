@@ -2,7 +2,15 @@ import { createHash, randomUUID } from "node:crypto";
 import { and, asc, desc, eq, gte, inArray, lt, or, sql } from "drizzle-orm";
 import type { AnyColumn } from "drizzle-orm";
 import type { PostgresJsDatabase } from "drizzle-orm/postgres-js";
-import { accounts, importBatches, monthCloses, statementTallies, transactions, transferMatches } from "@/db/schema";
+import {
+  accounts,
+  importBatches,
+  monthCloses,
+  pendingStatementImports,
+  statementTallies,
+  transactions,
+  transferMatches
+} from "@/db/schema";
 import { createServerLogger } from "@/lib/server-logger";
 import {
   categoryLabel,
@@ -18,6 +26,12 @@ import {
   learnManualClassificationRule
 } from "@/modules/classification/persistence";
 import type { CanonicalParsedRow } from "@/modules/source-profiles/icici-bank-csv";
+import type {
+  AccountType,
+  MetadataConfidence,
+  ProviderType,
+  SourceAccountMetadata
+} from "@/modules/source-profiles/account-metadata";
 
 type Db = PostgresJsDatabase<Record<string, unknown>>;
 const classificationLogger = createServerLogger("import-classification");
@@ -28,24 +42,37 @@ export async function createAccount(
     ownerUserId?: string;
     displayName: string;
     providerLabel: string;
+    providerType?: string;
+    providerAbbreviation?: string;
     currency: string;
+    accountType?: string;
     statementHolderName?: string;
     institutionName?: string;
     linkedAccountRef?: string;
+    accountRefLast4?: string;
+    displayNameSource?: string;
+    metadataConfidence?: string;
+    metadataWarnings?: string[];
   }
 ) {
   const [account] = await db
     .insert(accounts)
     .values({
       id: randomUUID(),
-      accountType: "bank",
+      accountType: input.accountType ?? "bank",
       ownerUserId: input.ownerUserId ?? "legacy-local-user",
       displayName: input.displayName,
       providerLabel: input.providerLabel,
+      providerType: input.providerType ?? "bank",
+      providerAbbreviation: input.providerAbbreviation,
       currency: input.currency,
       statementHolderName: input.statementHolderName,
       institutionName: input.institutionName,
       linkedAccountRef: input.linkedAccountRef,
+      accountRefLast4: input.accountRefLast4,
+      displayNameSource: input.displayNameSource ?? "user",
+      metadataConfidence: input.metadataConfidence ?? "defaulted",
+      metadataWarnings: input.metadataWarnings ?? [],
       active: true
     })
     .returning();
@@ -834,6 +861,77 @@ export async function getAccountMetadataSummary(db: Db, ownerUserId?: string) {
   };
 }
 
+export async function getPendingStatementImport(db: Db, pendingImportId: string, ownerUserId: string) {
+  const [pendingImport] = await db
+    .select()
+    .from(pendingStatementImports)
+    .where(
+      and(
+        eq(pendingStatementImports.id, pendingImportId),
+        eq(pendingStatementImports.ownerUserId, ownerUserId),
+        eq(pendingStatementImports.status, "pending")
+      )
+    )
+    .limit(1);
+
+  if (!pendingImport) {
+    return null;
+  }
+
+  return {
+    id: pendingImport.id,
+    filename: pendingImport.filename,
+    sourceProfileId: pendingImport.sourceProfileId,
+    metadata: normalizePendingStatementMetadata(pendingImport.extractedMetadata)
+  };
+}
+
+function normalizePendingStatementMetadata(value: unknown): SourceAccountMetadata {
+  const metadata = isRecord(value) ? value : {};
+
+  return {
+    accountHolderName: optionalString(metadata.accountHolderName),
+    accountName: requiredString(metadata.accountName, "Imported statement"),
+    accountRefLast4: optionalString(metadata.accountRefLast4),
+    accountRefObfuscated: optionalString(metadata.accountRefObfuscated),
+    accountType: normalizedAccountType(requiredString(metadata.accountType, "unknown")),
+    currency: requiredString(metadata.currency, "INR"),
+    metadataConfidence: normalizedMetadataConfidence(requiredString(metadata.metadataConfidence, "defaulted")),
+    metadataWarnings: stringArray(metadata.metadataWarnings),
+    providerAbbreviation: requiredString(metadata.providerAbbreviation, "UNK"),
+    providerName: requiredString(metadata.providerName, "Imported statement"),
+    providerType: normalizedProviderType(requiredString(metadata.providerType, "unknown"))
+  };
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+
+function optionalString(value: unknown) {
+  return typeof value === "string" && value.length > 0 ? value : undefined;
+}
+
+function requiredString(value: unknown, fallback: string) {
+  return typeof value === "string" && value.length > 0 ? value : fallback;
+}
+
+function stringArray(value: unknown) {
+  if (!Array.isArray(value)) {
+    return [];
+  }
+
+  return value.filter((item): item is string => typeof item === "string");
+}
+
+function normalizedMetadataConfidence(value: string): MetadataConfidence {
+  if (["extracted", "defaulted", "user_provided"].includes(value)) {
+    return value as MetadataConfidence;
+  }
+
+  return "defaulted";
+}
+
 export async function getAccountManagementRows(db: Db, ownerUserId?: string) {
   const accountRows = await db
     .select()
@@ -869,9 +967,13 @@ export async function getAccountManagementRows(db: Db, ownerUserId?: string) {
       id: account.id,
       displayName: account.displayName,
       providerLabel: account.providerLabel,
+      providerType: account.providerType,
+      providerAbbreviation: account.providerAbbreviation,
       accountType: account.accountType,
       currency: account.currency,
       statementHolderName: account.statementHolderName,
+      linkedAccountRef: account.linkedAccountRef,
+      accountRefLast4: account.accountRefLast4,
       sourceProfiles: Array.from(new Set(accountBatches.map((batch) => batch.sourceProfileId))).sort(),
       transactionCount: transactionCounts.get(account.id) ?? 0,
       lastImportedAt,
@@ -900,6 +1002,56 @@ export async function renameAccount(
   const [account] = await db
     .update(accounts)
     .set({ displayName })
+    .where(and(eq(accounts.id, input.accountId), eq(accounts.ownerUserId, input.ownerUserId)))
+    .returning();
+
+  if (!account) {
+    throw new Error("Account not found");
+  }
+
+  return account;
+}
+
+export async function updateAccountMetadata(
+  db: Db,
+  input: {
+    accountId: string;
+    ownerUserId: string;
+    accountName: string;
+    accountType: string;
+    providerType: string;
+    providerName: string;
+    accountHolderName: string;
+  }
+) {
+  const accountName = input.accountName.trim();
+  const providerName = input.providerName.trim();
+  const accountHolderName = input.accountHolderName.trim();
+
+  if (!accountName) {
+    throw new Error("Account name is required");
+  }
+
+  if (accountName.length > 80) {
+    throw new Error("Account name must be 80 characters or fewer");
+  }
+
+  if (!providerName) {
+    throw new Error("Provider name is required");
+  }
+
+  const [account] = await db
+    .update(accounts)
+    .set({
+      displayName: accountName,
+      accountType: normalizedAccountType(input.accountType),
+      providerType: normalizedProviderType(input.providerType),
+      providerLabel: providerName,
+      institutionName: providerName,
+      statementHolderName: accountHolderName || null,
+      displayNameSource: "user",
+      metadataConfidence: "user_provided"
+    })
     .where(and(eq(accounts.id, input.accountId), eq(accounts.ownerUserId, input.ownerUserId)))
     .returning();
 
@@ -949,6 +1101,22 @@ async function setAccountActive(
   }
 
   return account;
+}
+
+function normalizedAccountType(value: string): AccountType {
+  if (["savings", "current", "credit_card", "wallet", "unknown"].includes(value)) {
+    return value as AccountType;
+  }
+
+  return "unknown";
+}
+
+function normalizedProviderType(value: string): ProviderType {
+  if (["bank", "card_issuer", "wallet", "unknown"].includes(value)) {
+    return value as ProviderType;
+  }
+
+  return "unknown";
 }
 
 export async function getConsolidatedMonthTally(db: Db, month: string, ownerUserId?: string) {

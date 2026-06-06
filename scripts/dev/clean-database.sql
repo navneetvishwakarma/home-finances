@@ -13,6 +13,7 @@ TRUNCATE TABLE
   public."statement_tallies",
   public."transactions",
   public."import_batches",
+  public."pending_statement_imports",
   public."month_closes",
   public."classification_examples",
   public."classification_datasets",
@@ -20,6 +21,7 @@ TRUNCATE TABLE
   public."classification_rules",
   public."user_sessions",
   public."app_users",
+  public."account_statement_templates",
   public."accounts"
 RESTART IDENTITY;
 

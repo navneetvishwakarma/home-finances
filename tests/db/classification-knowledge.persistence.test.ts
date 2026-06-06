@@ -6,6 +6,7 @@ import { migrate } from "drizzle-orm/postgres-js/migrator";
 import { eq } from "drizzle-orm";
 import {
   accounts,
+  accountStatementTemplates,
   classificationDatasets,
   classificationExamples,
   classificationMemories,
@@ -42,6 +43,7 @@ describeDb("classification knowledge persistence", () => {
     await db.delete(statementTallies);
     await db.delete(transactions);
     await db.delete(importBatches);
+    await db.delete(accountStatementTemplates);
     await db.delete(accounts);
     await db.delete(classificationMemories);
     await db.delete(classificationRules);

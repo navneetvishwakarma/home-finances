@@ -6,6 +6,8 @@ TRUNCATE TABLE
   public."statement_tallies",
   public."transactions",
   public."import_batches",
+  public."account_statement_templates",
+  public."pending_statement_imports",
   public."month_closes",
   public."classification_examples",
   public."classification_datasets",
