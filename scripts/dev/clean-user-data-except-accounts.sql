@@ -50,6 +50,9 @@ BEGIN
 
   DELETE FROM public."month_closes"
   WHERE "owner_user_id" = target_owner_user_id;
+
+  DELETE FROM public."classification_memories"
+  WHERE "owner_user_id" = target_owner_user_id;
 END $$;
 
 COMMIT;

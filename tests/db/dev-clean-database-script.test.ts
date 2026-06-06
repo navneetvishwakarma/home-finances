@@ -23,6 +23,7 @@ const other = seedIds("20000000");
 const datasetId = "30000000-0000-4000-8000-000000000001";
 const exampleId = "30000000-0000-4000-8000-000000000002";
 const ruleId = "30000000-0000-4000-8000-000000000003";
+const memoryId = "30000000-0000-4000-8000-000000000004";
 
 describeDb("dev database cleanup scripts", () => {
   const sql = postgres(process.env.TEST_DATABASE_URL!, { max: 1, onnotice: () => {} });
@@ -55,6 +56,7 @@ describeDb("dev database cleanup scripts", () => {
         await expect(rowCount("classification_examples", exampleId)).resolves.toBe(0);
         await expect(rowCount("classification_datasets", datasetId)).resolves.toBe(0);
         await expect(rowCount("classification_rules", ruleId)).resolves.toBe(0);
+        await expect(rowCount("classification_memories", memoryId)).resolves.toBe(0);
         await expect(rowCount("month_closes", target.monthCloseId)).resolves.toBe(0);
       }
     );
@@ -81,6 +83,7 @@ describeDb("dev database cleanup scripts", () => {
         await expect(rowCount("classification_examples", exampleId)).resolves.toBe(0);
         await expect(rowCount("classification_datasets", datasetId)).resolves.toBe(0);
         await expect(rowCount("classification_rules", ruleId)).resolves.toBe(0);
+        await expect(rowCount("classification_memories", memoryId)).resolves.toBe(0);
         await expect(rowCount("month_closes", target.monthCloseId)).resolves.toBe(0);
       }
     );
@@ -92,6 +95,7 @@ describeDb("dev database cleanup scripts", () => {
       async () => {
         await seedUserRows(target);
         await seedUserRows(other);
+        await seedClassificationRows();
       },
       async () => {
         await expect(rowCount("accounts", target.accountId)).resolves.toBe(1);
@@ -102,6 +106,7 @@ describeDb("dev database cleanup scripts", () => {
         await expect(rowCount("transactions", target.outgoingTransactionId)).resolves.toBe(0);
         await expect(rowCount("transactions", target.incomingTransactionId)).resolves.toBe(0);
         await expect(rowCount("import_batches", target.importBatchId)).resolves.toBe(0);
+        await expect(rowCount("classification_memories", memoryId)).resolves.toBe(0);
         await expect(rowCount("month_closes", target.monthCloseId)).resolves.toBe(0);
         await expect(rowCount("accounts", other.accountId)).resolves.toBe(1);
         await expect(rowCount("transactions", other.outgoingTransactionId)).resolves.toBe(1);
@@ -119,6 +124,7 @@ describeDb("dev database cleanup scripts", () => {
       async () => {
         await seedUserRows(target);
         await seedUserRows(other);
+        await seedClassificationRows();
       },
       async () => {
         await expect(rowCount("accounts", target.accountId)).resolves.toBe(0);
@@ -129,6 +135,7 @@ describeDb("dev database cleanup scripts", () => {
         await expect(rowCount("transactions", target.outgoingTransactionId)).resolves.toBe(0);
         await expect(rowCount("transactions", target.incomingTransactionId)).resolves.toBe(0);
         await expect(rowCount("import_batches", target.importBatchId)).resolves.toBe(0);
+        await expect(rowCount("classification_memories", memoryId)).resolves.toBe(0);
         await expect(rowCount("month_closes", target.monthCloseId)).resolves.toBe(0);
         await expect(rowCount("accounts", other.accountId)).resolves.toBe(1);
         await expect(rowCount("transactions", other.outgoingTransactionId)).resolves.toBe(1);
@@ -370,6 +377,26 @@ describeDb("dev database cleanup scripts", () => {
         'food',
         1,
         'test'
+      )
+    `;
+    await sql`
+      INSERT INTO classification_memories (
+        id,
+        owner_user_id,
+        normalized_text,
+        token_signature,
+        category,
+        source,
+        priority
+      )
+      VALUES (
+        ${memoryId},
+        ${target.userId},
+        'cleanup memory',
+        'cleanup|memory',
+        'food',
+        'manual_override',
+        100
       )
     `;
   }

@@ -8,6 +8,7 @@ export default defineConfig({
   },
   test: {
     environment: "node",
+    fileParallelism: false,
     include: ["tests/**/*.test.ts"],
     setupFiles: ["tests/setup/load-env.ts"],
     testTimeout: 30000

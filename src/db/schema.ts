@@ -1,4 +1,4 @@
-import { bigint, boolean, date, integer, jsonb, pgTable, text, timestamp, unique, uuid } from "drizzle-orm/pg-core";
+import { bigint, boolean, date, index, integer, jsonb, pgTable, text, timestamp, unique, uuid } from "drizzle-orm/pg-core";
 
 export const accounts = pgTable("accounts", {
   id: uuid("id").primaryKey(),
@@ -194,5 +194,31 @@ export const classificationRules = pgTable(
       table.pattern,
       table.source
     )
+  })
+);
+
+export const classificationMemories = pgTable(
+  "classification_memories",
+  {
+    id: uuid("id").primaryKey(),
+    ownerUserId: text("owner_user_id").notNull().default("legacy-local-user"),
+    normalizedText: text("normalized_text").notNull(),
+    tokenSignature: text("token_signature").notNull(),
+    category: text("category").notNull(),
+    source: text("source").notNull(),
+    priority: integer("priority").notNull(),
+    supportCount: integer("support_count").notNull().default(1),
+    supersededAt: timestamp("superseded_at", { withTimezone: true }),
+    lastMatchedAt: timestamp("last_matched_at", { withTimezone: true }),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+    updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow()
+  },
+  (table) => ({
+    ownerTokenSignatureSourceUnique: unique("classification_memories_owner_token_signature_source_unique").on(
+      table.ownerUserId,
+      table.tokenSignature,
+      table.source
+    ),
+    normalizedTextIndex: index("classification_memories_normalized_text_idx").on(table.normalizedText)
   })
 );

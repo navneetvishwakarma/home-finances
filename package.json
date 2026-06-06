@@ -6,6 +6,8 @@
     "dev": "next dev",
     "build": "npm run credscan && next build",
     "db:migrate": "node scripts/migrate-database.mjs",
+    "classification-memory:export": "node scripts/classification-memory-export.mjs",
+    "classification-memory:import": "node scripts/classification-memory-import.mjs",
     "prod:build": "npm run db:migrate && npm run build",
     "credscan": "node scripts/credscan.mjs",
     "start": "next start",

@@ -8,6 +8,7 @@ import {
   accounts,
   classificationDatasets,
   classificationExamples,
+  classificationMemories,
   classificationRules,
   importBatches,
   statementTallies,
@@ -21,6 +22,10 @@ import {
   updateTransactionCategory
 } from "@/modules/imports/persistence";
 import {
+  classifyWithClassificationMemory,
+  exportClassificationMemory,
+  importClassificationMemory,
+  learnClassificationMemory,
   importClassificationDataset,
   seedLocalClassificationKnowledge
 } from "@/modules/classification/persistence";
@@ -38,6 +43,7 @@ describeDb("classification knowledge persistence", () => {
     await db.delete(transactions);
     await db.delete(importBatches);
     await db.delete(accounts);
+    await db.delete(classificationMemories);
     await db.delete(classificationRules);
     await db.delete(classificationExamples);
     await db.delete(classificationDatasets);
@@ -50,7 +56,9 @@ describeDb("classification knowledge persistence", () => {
   afterEach(() => {
     delete process.env.GEMINI_API_KEY;
     delete process.env.GEMINI_MODEL;
+    delete process.env.APP_LOG_LEVEL;
     vi.unstubAllGlobals();
+    vi.restoreAllMocks();
   });
 
   test("imports local labeled transaction datasets into examples and seed rules", async () => {
@@ -129,7 +137,7 @@ describeDb("classification knowledge persistence", () => {
     });
   });
 
-  test("manual categorization creates a learned rule and backfills non-manual matches", async () => {
+  test("manual categorization creates learned memory and backfills non-manual matches", async () => {
     const account = await createAccount(db, {
       displayName: "ICICI Savings Learned Rule Test",
       providerLabel: "ICICI Bank",
@@ -164,13 +172,13 @@ describeDb("classification knowledge persistence", () => {
         {
           valueDate: "2026-04-02",
           transactionDate: "2026-04-02",
-          description: "UPI GROCERY STORE BRANCH",
+          description: "UPI GROCERY STORE ORDER999",
           withdrawalAmount: "1300.00",
           depositAmount: "0.00",
           balance: "8700.00",
           rawRow: {
             "S No.": "2",
-            "Transaction Remarks": "UPI GROCERY STORE BRANCH",
+            "Transaction Remarks": "UPI GROCERY STORE ORDER999",
             "Withdrawal Amount(INR)": "1300.00",
             "Deposit Amount(INR)": "0.00"
           }
@@ -184,7 +192,7 @@ describeDb("classification knowledge persistence", () => {
     });
 
     const refreshed = await db.select().from(transactions);
-    const learnedRules = await db.select().from(classificationRules);
+    const learnedMemories = await db.select().from(classificationMemories);
 
     expect(refreshed).toContainEqual(
       expect.objectContaining({
@@ -200,14 +208,14 @@ describeDb("classification knowledge persistence", () => {
         categorySource: "learned_rule"
       })
     );
-    const learnedRule = learnedRules.find(
-      (rule) =>
-        rule.pattern === "grocery store" &&
-        rule.category === "food" &&
-        rule.source === "manual_override"
+    const learnedMemory = learnedMemories.find(
+      (memory) =>
+        memory.tokenSignature === "grocery|store" &&
+        memory.category === "food" &&
+        memory.source === "manual_override"
     );
 
-    expect(learnedRule?.supportCount).toBeGreaterThanOrEqual(1);
+    expect(learnedMemory?.supportCount).toBeGreaterThanOrEqual(1);
   });
 
   test("seeds local datasets idempotently and backfills existing non-manual transactions", async () => {
@@ -264,7 +272,7 @@ describeDb("classification knowledge persistence", () => {
     );
   });
 
-  test("uses AI import categorization for weak fallback rows and stores reusable AI rules", async () => {
+  test("uses AI import categorization for weak fallback rows and stores reusable AI memory", async () => {
     process.env.GEMINI_API_KEY = "test-gemini-key";
     vi.stubGlobal(
       "fetch",
@@ -324,15 +332,16 @@ describeDb("classification knowledge persistence", () => {
         }
       ]
     });
-    const rules = await db.select().from(classificationRules);
+    const memories = await db.select().from(classificationMemories);
 
     expect(transaction).toMatchObject({
       category: "food",
       categorySource: "ai"
     });
-    expect(rules).toContainEqual(
+    expect(memories).toContainEqual(
       expect.objectContaining({
-        pattern: "BIGBASKET",
+        normalizedText: "upi bigbasket order123",
+        tokenSignature: "bigbasket",
         category: "food",
         source: "ai_import"
       })
@@ -372,6 +381,444 @@ describeDb("classification knowledge persistence", () => {
       categorySource: "ai"
     });
     expect(fetch).toHaveBeenCalledTimes(1);
+  });
+
+  test("uses local classification memory for weak rows before Gemini even when the API key is missing", async () => {
+    await db.delete(classificationMemories);
+    delete process.env.GEMINI_API_KEY;
+    vi.stubGlobal("fetch", vi.fn());
+
+    await learnClassificationMemory(db, {
+      description: "UPI/PETSHOP/ORDER123",
+      category: "shopping",
+      source: "manual_override"
+    });
+    const account = await createAccount(db, {
+      displayName: "ICICI Savings Local Memory Test",
+      providerLabel: "ICICI Bank",
+      currency: "INR"
+    });
+    const importBatch = await createImportBatch(db, {
+      accountId: account.id,
+      sourceProfileId: "icici-bank-csv",
+      filename: "local-memory.csv",
+      fileFingerprint: "sha256:local-memory",
+      rawSource: "csv-content",
+      status: "uploaded"
+    });
+
+    const persisted = await persistParsedTransactions(db, {
+      accountId: account.id,
+      importBatchId: importBatch.id,
+      rows: [
+        {
+          valueDate: "2026-04-01",
+          transactionDate: "2026-04-01",
+          description: "UPI PETSHOP ORDER999",
+          withdrawalAmount: "1200.00",
+          depositAmount: "0.00",
+          balance: "10000.00",
+          rawRow: {
+            "S No.": "1",
+            "Transaction Remarks": "UPI PETSHOP ORDER999",
+            "Withdrawal Amount(INR)": "1200.00",
+            "Deposit Amount(INR)": "0.00"
+          }
+        }
+      ]
+    });
+
+    expect(persisted[0]).toMatchObject({
+      category: "shopping",
+      categorySource: "learned_rule"
+    });
+    expect(fetch).not.toHaveBeenCalled();
+  });
+
+  test("logs import classification counts without raw descriptions, account ids, CSVs, or API keys", async () => {
+    await db.delete(classificationMemories);
+    process.env.APP_LOG_LEVEL = "debug";
+    process.env.GEMINI_API_KEY = "test-gemini-key";
+    vi.spyOn(console, "info").mockImplementation(() => {});
+    vi.spyOn(console, "debug").mockImplementation(() => {});
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async () =>
+        new Response(
+          JSON.stringify({
+            candidates: [
+              {
+                content: {
+                  parts: [
+                    {
+                      text: JSON.stringify([
+                        { rowId: "row-1", merchantKeyword: "SENSITIVE SHOP", category: "shopping" }
+                      ])
+                    }
+                  ]
+                }
+              }
+            ]
+          }),
+          { status: 200 }
+        )
+      )
+    );
+    const account = await createAccount(db, {
+      displayName: "ICICI Savings Logging Test",
+      providerLabel: "ICICI Bank",
+      currency: "INR"
+    });
+    const importBatch = await createImportBatch(db, {
+      accountId: account.id,
+      sourceProfileId: "icici-bank-csv",
+      filename: "logging.csv",
+      fileFingerprint: "sha256:logging",
+      rawSource: "csv-content-with-sensitive-shop",
+      status: "uploaded"
+    });
+
+    await persistParsedTransactions(db, {
+      accountId: account.id,
+      importBatchId: importBatch.id,
+      rows: [
+        {
+          valueDate: "2026-04-01",
+          transactionDate: "2026-04-01",
+          description: "UPI/SENSITIVE SHOP/ORDER123",
+          withdrawalAmount: "1200.00",
+          depositAmount: "0.00",
+          balance: "10000.00",
+          rawRow: {
+            "S No.": "1",
+            "Transaction Remarks": "UPI/SENSITIVE SHOP/ORDER123",
+            "Withdrawal Amount(INR)": "1200.00",
+            "Deposit Amount(INR)": "0.00"
+          }
+        }
+      ]
+    });
+
+    const logs = vi
+      .mocked(console.info)
+      .mock.calls.map((call) => JSON.parse(String(call[0])))
+      .filter((payload) => payload.logger === "import-classification");
+    const serializedLogs = JSON.stringify(logs);
+
+    expect(logs).toEqual([
+      expect.objectContaining({
+        message: "import.classification.pre_ai",
+        weakCandidateCount: 1,
+        localMemoryHitCount: 0,
+        aiRequiredCount: 1
+      }),
+      expect.objectContaining({
+        message: "import.classification.post_ai",
+        aiClassificationCount: 1,
+        storedMemoryCount: 1
+      })
+    ]);
+    expect(serializedLogs).not.toContain("UPI/SENSITIVE SHOP/ORDER123");
+    expect(serializedLogs).not.toContain("csv-content-with-sensitive-shop");
+    expect(serializedLogs).not.toContain(account.id);
+    expect(serializedLogs).not.toContain("test-gemini-key");
+  });
+
+  test("stores AI classification memory and reuses it for similar descriptions", async () => {
+    await db.delete(classificationMemories);
+
+    const learned = await learnClassificationMemory(db, {
+      description: "UPI/BIGBASKET/ORDER123",
+      category: "food",
+      source: "ai_import"
+    });
+    const classification = await classifyWithClassificationMemory(db, "UPI BIGBASKET ORDER999");
+
+    expect(learned).toEqual(
+      expect.objectContaining({
+        normalizedText: "upi bigbasket order123",
+        tokenSignature: "bigbasket",
+        category: "food",
+        source: "ai_import",
+        priority: 25,
+        supportCount: 1,
+        supersededAt: null
+      })
+    );
+    expect(classification).toEqual({
+      category: "food",
+      categorySource: "ai"
+    });
+  });
+
+  test("manual classification memory supersedes conflicting AI memory for the same signature", async () => {
+    await db.delete(classificationMemories);
+
+    await learnClassificationMemory(db, {
+      description: "UPI/BIGBASKET/ORDER123",
+      category: "shopping",
+      source: "ai_import"
+    });
+    await learnClassificationMemory(db, {
+      description: "UPI BIGBASKET ORDER999",
+      category: "food",
+      source: "manual_override"
+    });
+
+    const memories = await db.select().from(classificationMemories);
+    const classification = await classifyWithClassificationMemory(db, "UPI/BIGBASKET/ORDER555");
+
+    expect(memories).toContainEqual(
+      expect.objectContaining({
+        tokenSignature: "bigbasket",
+        category: "shopping",
+        source: "ai_import",
+        supersededAt: expect.any(Date)
+      })
+    );
+    expect(memories).toContainEqual(
+      expect.objectContaining({
+        tokenSignature: "bigbasket",
+        category: "food",
+        source: "manual_override",
+        supersededAt: null
+      })
+    );
+    expect(classification).toEqual({
+      category: "food",
+      categorySource: "learned_rule"
+    });
+  });
+
+  test("resolves exact and token memory matches by priority together", async () => {
+    await db.delete(classificationMemories);
+
+    await learnClassificationMemory(db, {
+      description: "UPI/BIGBASKET/ORDER999",
+      category: "food",
+      source: "manual_override"
+    });
+    await learnClassificationMemory(db, {
+      description: "UPI/BIGBASKET/ORDER123",
+      category: "shopping",
+      source: "ai_import"
+    });
+
+    const classification = await classifyWithClassificationMemory(db, "UPI/BIGBASKET/ORDER123");
+
+    expect(classification).toEqual({
+      category: "food",
+      categorySource: "learned_rule"
+    });
+  });
+
+  test("keeps classification memory scoped to the account owner", async () => {
+    await db.delete(classificationMemories);
+    await learnClassificationMemory(db, {
+      description: "UPI/OWNER SHOP/ORDER123",
+      category: "food",
+      source: "manual_override",
+      ownerUserId: "owner-a"
+    });
+    await learnClassificationMemory(db, {
+      description: "UPI/OWNER SHOP/ORDER123",
+      category: "shopping",
+      source: "manual_override",
+      ownerUserId: "owner-b"
+    });
+
+    await expect(classifyWithClassificationMemory(db, "UPI OWNER SHOP ORDER999", "owner-a")).resolves.toEqual({
+      category: "food",
+      categorySource: "learned_rule"
+    });
+    await expect(classifyWithClassificationMemory(db, "UPI OWNER SHOP ORDER999", "owner-b")).resolves.toEqual({
+      category: "shopping",
+      categorySource: "learned_rule"
+    });
+  });
+
+  test("does not classify locally when active memories for a signature have equal priority conflicts", async () => {
+    await db.delete(classificationMemories);
+
+    await db.insert(classificationMemories).values([
+      {
+        id: randomUUID(),
+        ownerUserId: "legacy-local-user",
+        normalizedText: "upi conflict merchant one",
+        tokenSignature: "conflict|merchant",
+        category: "food",
+        source: "ai_import",
+        priority: 25,
+        supportCount: 1
+      },
+      {
+        id: randomUUID(),
+        ownerUserId: "legacy-local-user",
+        normalizedText: "upi conflict merchant two",
+        tokenSignature: "conflict|merchant",
+        category: "shopping",
+        source: "imported_memory",
+        priority: 25,
+        supportCount: 1
+      }
+    ]);
+
+    await expect(classifyWithClassificationMemory(db, "UPI/CONFLICT/MERCHANT/ORDER123")).resolves.toBeUndefined();
+  });
+
+  test("exports and imports portable classification memory without raw account or secret data", async () => {
+    await db.delete(classificationMemories);
+
+    await learnClassificationMemory(db, {
+      description: "UPI/MANUAL SHOP/ORDER123",
+      category: "shopping",
+      source: "manual_override"
+    });
+    await learnClassificationMemory(db, {
+      description: "UPI/AI CAFE/ORDER123",
+      category: "food",
+      source: "ai_import"
+    });
+
+    const exported = await exportClassificationMemory(db);
+    const serialized = JSON.stringify(exported);
+
+    expect(exported).toEqual(
+      expect.objectContaining({
+        schemaVersion: 1,
+        exportedAt: expect.any(String),
+        memories: expect.arrayContaining([
+          expect.objectContaining({
+            tokenSignature: "manual|shop",
+            category: "shopping",
+            source: "manual_override",
+            priority: 100,
+            supportCount: 1
+          }),
+          expect.objectContaining({
+            tokenSignature: "cafe",
+            category: "food",
+            source: "ai_import",
+            priority: 25,
+            supportCount: 1
+          })
+        ])
+      })
+    );
+    expect(serialized).not.toContain("accountId");
+    expect(serialized).not.toContain("ownerUserId");
+    expect(serialized).not.toContain("rawSource");
+    expect(serialized).not.toContain("apiKey");
+    expect(serialized).not.toContain("UPI/MANUAL SHOP/ORDER123");
+    expect(serialized).not.toContain("manual shop");
+
+    await db.delete(classificationMemories);
+    const result = await importClassificationMemory(db, exported);
+    const classification = await classifyWithClassificationMemory(db, "UPI MANUAL SHOP ORDER999");
+
+    expect(result).toEqual({ importedCount: 2, skippedCount: 0 });
+    for (const memory of exported.memories) {
+      expect(memory).not.toHaveProperty("normalizedText");
+    }
+    expect(classification).toEqual({
+      category: "shopping",
+      categorySource: "learned_rule"
+    });
+  });
+
+  test("imports valid memory only and keeps manual precedence over conflicting AI memory", async () => {
+    await db.delete(classificationMemories);
+
+    const result = await importClassificationMemory(db, {
+      schemaVersion: 1,
+      exportedAt: new Date().toISOString(),
+      memories: [
+        {
+          normalizedText: "upi precedence merchant order123",
+          tokenSignature: "merchant|precedence",
+          category: "food",
+          source: "ai_import",
+          priority: 25,
+          supportCount: 1
+        },
+        {
+          normalizedText: "upi precedence merchant order999",
+          tokenSignature: "merchant|precedence",
+          category: "shopping",
+          source: "manual_override",
+          priority: 100,
+          supportCount: 1
+        },
+        {
+          normalizedText: "upi invalid merchant",
+          tokenSignature: "invalid|merchant",
+          category: "not_real",
+          source: "imported_memory",
+          priority: 25,
+          supportCount: 1
+        },
+        {
+          normalizedText: "neft transfer to self",
+          tokenSignature: "",
+          category: "transfers",
+          source: "imported_memory",
+          priority: 25,
+          supportCount: 1
+        }
+      ]
+    });
+    const memories = await db.select().from(classificationMemories);
+    const classification = await classifyWithClassificationMemory(db, "UPI/PRECEDENCE/MERCHANT/ORDER555");
+
+    expect(result).toEqual({ importedCount: 2, skippedCount: 2 });
+    expect(memories).toHaveLength(2);
+    expect(classification).toEqual({
+      category: "shopping",
+      categorySource: "learned_rule"
+    });
+  });
+
+  test("derives imported memory priority from source instead of trusting payload priority", async () => {
+    await db.delete(classificationMemories);
+
+    const result = await importClassificationMemory(db, {
+      schemaVersion: 1,
+      exportedAt: new Date().toISOString(),
+      memories: [
+        {
+          normalizedText: "upi priority tamper merchant order123",
+          tokenSignature: "merchant|priority|tamper",
+          category: "food",
+          source: "imported_memory",
+          priority: 1000,
+          supportCount: 1
+        },
+        {
+          normalizedText: "upi priority tamper merchant order999",
+          tokenSignature: "merchant|priority|tamper",
+          category: "shopping",
+          source: "manual_override",
+          priority: 100,
+          supportCount: 1
+        }
+      ]
+    });
+    const memories = await db.select().from(classificationMemories);
+    const classification = await classifyWithClassificationMemory(db, "UPI/PRIORITY/TAMPER/MERCHANT/ORDER555");
+
+    expect(result).toEqual({ importedCount: 2, skippedCount: 0 });
+    expect(memories).toContainEqual(
+      expect.objectContaining({
+        tokenSignature: "merchant|priority|tamper",
+        source: "imported_memory",
+        priority: 25,
+        supersededAt: expect.any(Date)
+      })
+    );
+    expect(classification).toEqual({
+      category: "shopping",
+      categorySource: "learned_rule"
+    });
   });
 
   test("keeps learned and seed rules ahead of AI import categorization", async () => {

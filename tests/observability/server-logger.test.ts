@@ -57,3 +57,13 @@ test("suppresses every application log when the configured level is off", () => 
   expect(console.warn).not.toHaveBeenCalled();
   expect(console.error).not.toHaveBeenCalled();
 });
+
+test("suppresses application logs under Vitest unless a level is configured", () => {
+  delete process.env.APP_LOG_LEVEL;
+  process.env.VITEST = "true";
+  const logger = createServerLogger("imports");
+
+  logger.info("hidden", { candidateCount: 2 });
+
+  expect(console.info).not.toHaveBeenCalled();
+});

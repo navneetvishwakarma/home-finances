@@ -3,6 +3,7 @@ import { and, asc, desc, eq, gte, inArray, lt, or, sql } from "drizzle-orm";
 import type { AnyColumn } from "drizzle-orm";
 import type { PostgresJsDatabase } from "drizzle-orm/postgres-js";
 import { accounts, importBatches, monthCloses, statementTallies, transactions, transferMatches } from "@/db/schema";
+import { createServerLogger } from "@/lib/server-logger";
 import {
   categoryLabel,
   isTransactionCategory,
@@ -11,13 +12,15 @@ import {
 } from "@/modules/classification/categories";
 import { classifyImportTransactionsWithAi } from "@/modules/classification/ai-import-classifier";
 import {
+  classifyWithClassificationMemory,
   classifyWithStoredRules,
-  learnAiImportClassificationRule,
+  learnClassificationMemory,
   learnManualClassificationRule
 } from "@/modules/classification/persistence";
 import type { CanonicalParsedRow } from "@/modules/source-profiles/icici-bank-csv";
 
 type Db = PostgresJsDatabase<Record<string, unknown>>;
+const classificationLogger = createServerLogger("import-classification");
 
 export async function createAccount(
   db: Db,
@@ -150,6 +153,7 @@ export async function persistParsedTransactions(
     rows: CanonicalParsedRow[];
   }
 ) {
+  const ownerUserId = await getAccountOwnerUserId(db, input.accountId);
   const preparedRows = await Promise.all(
     input.rows.map(async (row, index) => {
       const direction = moneyToMinorUnits(row.depositAmount) > 0 ? "incoming" : "outgoing";
@@ -194,6 +198,25 @@ export async function persistParsedTransactions(
       };
     })
   );
+  let localMemoryHitCount = 0;
+
+  for (const row of preparedRows) {
+    if (!isAiImportCandidate(row.classification)) {
+      continue;
+    }
+
+    const memoryClassification = await classifyWithClassificationMemory(db, row.value.description, ownerUserId);
+    if (!memoryClassification) {
+      continue;
+    }
+
+    row.classification = memoryClassification;
+    row.value.category = memoryClassification.category;
+    row.value.categorySource = memoryClassification.categorySource;
+    localMemoryHitCount += 1;
+  }
+
+  const weakCandidateCount = preparedRows.filter((row) => isAiImportCandidate(row.classification)).length + localMemoryHitCount;
   const aiCandidates = preparedRows
     .filter((row) => isAiImportCandidate(row.classification))
     .map((row) => ({
@@ -203,7 +226,14 @@ export async function persistParsedTransactions(
       direction: row.value.direction as "incoming" | "outgoing",
       amountMinorUnits: row.value.amountMinorUnits
     }));
+  classificationLogger.info("import.classification.pre_ai", {
+    weakCandidateCount,
+    localMemoryHitCount,
+    aiRequiredCount: aiCandidates.length
+  });
   const aiResult = await classifyImportTransactionsWithAi(aiCandidates);
+  let aiClassificationCount = 0;
+  let storedMemoryCount = 0;
 
   for (const row of preparedRows) {
     const aiClassification = aiResult.classifications.get(row.rowId);
@@ -214,8 +244,21 @@ export async function persistParsedTransactions(
 
     row.value.category = aiClassification.category;
     row.value.categorySource = "ai";
-    await learnAiImportClassificationRule(db, aiClassification);
+    const memory = await learnClassificationMemory(db, {
+      description: row.value.description,
+      category: aiClassification.category,
+      source: "ai_import",
+      ownerUserId
+    });
+    aiClassificationCount += 1;
+    if (memory) {
+      storedMemoryCount += 1;
+    }
   }
+  classificationLogger.info("import.classification.post_ai", {
+    aiClassificationCount,
+    storedMemoryCount
+  });
 
   const values = preparedRows.map((row) => row.value);
   const persistedTransactions = [];
@@ -304,7 +347,8 @@ export async function updateTransactionCategory(
 
   await learnManualClassificationRule(db, {
     description: transaction.description,
-    category: input.category
+    category: input.category,
+    ownerUserId: input.ownerUserId
   });
 
   return transaction;
@@ -351,7 +395,8 @@ export async function updateTransactionDetails(
 
   await learnManualClassificationRule(db, {
     description: transaction.description,
-    category: input.category
+    category: input.category,
+    ownerUserId: input.ownerUserId
   });
 
   return transaction;
@@ -1507,6 +1552,12 @@ function accountOwnerCondition(accountId: AnyColumn, ownerUserId?: string) {
   }
 
   return sql`${accountId} IN (SELECT ${accounts.id} FROM ${accounts} WHERE ${accounts.ownerUserId} = ${ownerUserId})`;
+}
+
+async function getAccountOwnerUserId(db: Db, accountId: string) {
+  const [account] = await db.select().from(accounts).where(eq(accounts.id, accountId)).limit(1);
+
+  return account?.ownerUserId ?? "legacy-local-user";
 }
 
 async function requireOwnedAccount(db: Db, accountId: string, ownerUserId: string) {
