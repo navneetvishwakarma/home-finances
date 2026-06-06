@@ -16,6 +16,7 @@ TRUNCATE TABLE
   public."month_closes",
   public."classification_examples",
   public."classification_datasets",
+  public."classification_memories",
   public."classification_rules",
   public."user_sessions",
   public."app_users",

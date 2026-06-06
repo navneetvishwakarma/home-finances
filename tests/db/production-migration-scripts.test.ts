@@ -15,6 +15,28 @@ describe("production migration scripts", () => {
     expect(packageJson.scripts["prod:build"]).toBe("npm run db:migrate && npm run build");
   });
 
+  test("exposes classification memory export and import scripts", async () => {
+    const packageJson = JSON.parse(await readFile("package.json", "utf8")) as {
+      scripts: Record<string, string>;
+    };
+
+    expect(packageJson.scripts["classification-memory:export"]).toBe(
+      "node scripts/classification-memory-export.mjs"
+    );
+    expect(packageJson.scripts["classification-memory:import"]).toBe(
+      "node scripts/classification-memory-import.mjs"
+    );
+  });
+
+  test("classification memory scripts fail clearly when file arguments are missing", async () => {
+    await expect(execFileAsync("node", ["scripts/classification-memory-export.mjs"])).rejects.toMatchObject({
+      stderr: expect.stringContaining("--out is required")
+    });
+    await expect(execFileAsync("node", ["scripts/classification-memory-import.mjs"])).rejects.toMatchObject({
+      stderr: expect.stringContaining("--in is required")
+    });
+  });
+
   test("fails clearly when DATABASE_URL is missing", async () => {
     const env = { ...process.env };
     delete env.DATABASE_URL;
